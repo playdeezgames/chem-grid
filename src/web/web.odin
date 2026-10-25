@@ -36,6 +36,7 @@ SLOTS_Y :: 74
 
 Screen :: enum {
 	Title,
+	Select, // pick a level
 	Play,
 }
 
@@ -58,12 +59,53 @@ main :: proc() {
 	js.add_window_event_listener(.Key_Down, nil, on_key)
 }
 
-start_endless :: proc() {
-	seed := u64(time.now()._nsec) | 1
-	play = game.game_endless(seed)
+new_seed :: proc() -> u64 {
+	return u64(time.now()._nsec) | 1
+}
+
+begin :: proc() {
 	screen = .Play
 	hover_set = false
 	msg = ""
+}
+
+start_endless :: proc() {
+	play = game.game_endless(new_seed())
+	begin()
+}
+
+start_level :: proc(index: int) {
+	if index >= 0 && index < len(game.LEVELS) {
+		play = game.game_level(index, new_seed())
+		begin()
+	}
+}
+
+// Play the same mode again.
+retry :: proc() {
+	if play.has_goals {
+		start_level(play.level)
+	} else {
+		start_endless()
+	}
+}
+
+has_next_level :: proc() -> bool {
+	return play.has_goals && play.level + 1 < len(game.LEVELS)
+}
+
+// The main button on the end-of-game overlay: next level after a win, otherwise try again.
+overlay_primary :: proc() {
+	if play.phase == .Won && has_next_level() {
+		start_level(play.level + 1)
+	} else {
+		retry()
+	}
+}
+
+// Back out of a game to where it was started from.
+leave :: proc() {
+	screen = play.has_goals ? .Select : .Title
 }
 
 set_message :: proc(color: u32, format: string, args: ..any) {
@@ -81,7 +123,17 @@ BUTTON_W :: f32(120)
 rotate_button := Rect{BUTTON_X, 190, BUTTON_W, 20}
 menu_button := Rect{BUTTON_X, 214, BUTTON_W, 20}
 sound_button := Rect{BUTTON_X, 238, BUTTON_W, 20}
-start_button := Rect{140, 150, 120, 28}
+endless_button := Rect{140, 136, 120, 26}
+levels_button := Rect{140, 170, 120, 26}
+back_button := Rect{12, 270, 100, 22}
+overlay_primary_button := Rect{BOARD_X + BOARD_PX / 2 - 70, 176, 140, 22}
+overlay_secondary_button := Rect{BOARD_X + BOARD_PX / 2 - 70, 204, 140, 22}
+
+LEVEL_ROWS :: 10 // levels per column on the select screen
+
+level_button :: proc(i: int) -> Rect {
+	return {f32(12 + (i / LEVEL_ROWS) * 196), f32(44 + (i % LEVEL_ROWS) * 22), 184, 20}
+}
 
 slot_rect :: proc(i: int) -> Rect {
 	return {f32(PANEL_X + (i % 3) * SLOT_PITCH), f32(SLOTS_Y + (i / 3) * SLOT_PITCH), game.TILE, game.TILE}
@@ -122,6 +174,8 @@ take_events :: proc() {
 			beep(e.id == .None ? .Molecule : .Recognised)
 		case .Game_Over, .Supply_Empty:
 			over = true
+		case .Won:
+			beep(.Win)
 		}
 	}
 	if placed && !completed {
@@ -160,14 +214,26 @@ on_key :: proc(e: js.Event) {
 	case .Title:
 		switch code {
 		case "Enter", "Space": start_endless()
+		case "KeyL": screen = .Select
 		case "KeyM": muted = !muted
 		case: handled = false
+		}
+	case .Select:
+		switch code {
+		case "Escape": screen = .Title
+		case "KeyM": muted = !muted
+		case:
+			if len(code) == 6 && code[:5] == "Digit" && code[5] >= '1' && code[5] <= '9' {
+				start_level(int(code[5] - '1'))
+			} else {
+				handled = false
+			}
 		}
 	case .Play:
 		if play.phase != .Playing {
 			switch code {
-			case "Enter", "Space": start_endless()
-			case "Escape": screen = .Title
+			case "Enter", "Space": overlay_primary()
+			case "Escape": leave()
 			case: handled = false
 			}
 			break
@@ -175,7 +241,7 @@ on_key :: proc(e: js.Event) {
 		switch code {
 		case "KeyR", "KeyE", "Space", "ArrowUp", "ArrowRight": do_rotate(1)
 		case "KeyQ", "ArrowLeft", "ArrowDown": do_rotate(-1)
-		case "Escape": screen = .Title
+		case "Escape": leave()
 		case "KeyM": muted = !muted
 		case:
 			if len(code) == 6 && code[:5] == "Digit" && code[5] >= '1' && code[5] <= '8' {
@@ -210,18 +276,34 @@ pointer_down :: proc "c" (x, y: f32, precise: i32) {
 	context = runtime.default_context()
 	switch screen {
 	case .Title:
-		if in_rect(start_button, x, y) {
+		if in_rect(endless_button, x, y) {
 			start_endless()
+		} else if in_rect(levels_button, x, y) {
+			screen = .Select
+		}
+	case .Select:
+		if in_rect(back_button, x, y) {
+			screen = .Title
+		}
+		for i in 0 ..< len(game.LEVELS) {
+			if in_rect(level_button(i), x, y) {
+				start_level(i)
+				return
+			}
 		}
 	case .Play:
 		if play.phase != .Playing {
-			start_endless()
+			if in_rect(overlay_primary_button, x, y) {
+				overlay_primary()
+			} else if in_rect(overlay_secondary_button, x, y) {
+				leave()
+			}
 			return
 		}
 		if in_rect(rotate_button, x, y) {
 			do_rotate(1)
 		} else if in_rect(menu_button, x, y) {
-			screen = .Title
+			leave()
 		} else if in_rect(sound_button, x, y) {
 			muted = !muted
 		} else if row, col, ok := cell_at(x, y); ok {
@@ -243,11 +325,22 @@ pointer_down :: proc "c" (x, y: f32, precise: i32) {
 	}
 }
 
-// QA hook for scripted play: 0 title, 1 playing, 2 game over, 3 supply empty.
+// QA hook for scripted play: 0 not in a game, then 1 playing, 2 no moves left, 3 out of atoms, 4 won.
 @(export)
 qa_phase :: proc "c" () -> i32 {
-	if screen == .Title { return 0 }
+	if screen != .Play { return 0 }
 	return 1 + i32(play.phase)
+}
+
+// QA hook: start level `index`, or endless mode when index is negative.
+@(export)
+qa_start :: proc "c" (index: i32) {
+	context = runtime.default_context()
+	if index < 0 {
+		start_endless()
+	} else {
+		start_level(int(index))
+	}
 }
 
 // Wheel or right click: rotate.
@@ -295,19 +388,29 @@ draw_button :: proc(r: Rect, label: string, enabled := true) {
 draw :: proc() {
 	fill_rect(0, 0, game.SCREEN_W, game.SCREEN_H, BACK, 1)
 	switch screen {
-	case .Title: draw_title()
-	case .Play:  draw_play()
+	case .Title:  draw_title()
+	case .Select: draw_select()
+	case .Play:   draw_play()
 	}
 }
 
 draw_title :: proc() {
-	draw_centered(200, 62, "CHEM-GRID", INK, 4)
-	draw_centered(200, 108, "Place atoms. Match every bond.", DIM, 1)
-	draw_centered(200, 120, "Close a molecule and it scores.", DIM, 1)
-	draw_button(start_button, "ENDLESS")
-	draw_centered(200, 196, "Mouse: click to place, R or wheel to rotate", DIM, 1)
-	draw_centered(200, 208, "Touch: tap a cell, tap it again to place", DIM, 1)
+	draw_centered(200, 44, "CHEM-GRID", INK, 4)
+	draw_centered(200, 92, "Place atoms. Match every bond.", DIM, 1)
+	draw_centered(200, 104, "Close a molecule and it scores.", DIM, 1)
+	draw_button(endless_button, "ENDLESS")
+	draw_button(levels_button, "LEVELS (L)")
+	draw_centered(200, 222, "Mouse: click to place, R or wheel to rotate", DIM, 1)
+	draw_centered(200, 234, "Touch: tap a cell, tap it again to place", DIM, 1)
 	draw_centered(200, 284, "Font DINOBYTE by mby, CC BY 4.0", DIM, 1)
+}
+
+draw_select :: proc() {
+	draw_centered(200, 16, "LEVELS", INK, 2)
+	for l, i in game.LEVELS {
+		draw_button(level_button(i), fmt.tprintf("%d %s", i + 1, l.name))
+	}
+	draw_button(back_button, "BACK (ESC)")
 }
 
 draw_board :: proc() {
@@ -337,7 +440,7 @@ draw_board :: proc() {
 
 draw_panel :: proc() {
 	x := f32(PANEL_X)
-	draw_text(x, 10, "ENDLESS", DIM, 1)
+	draw_text(x, 10, play.has_goals ? game.LEVELS[play.level].name : "ENDLESS", DIM, 1)
 	draw_text(x, 26, "SCORE", DIM, 1)
 	buf: [16]u8
 	draw_text(x, 38, fmt.bprintf(buf[:], "%d", play.score), INK, 2)
@@ -355,8 +458,11 @@ draw_panel :: proc() {
 		}
 	}
 
+	if play.has_goals {
+		draw_goals(x, 146)
+	}
 	draw_button(rotate_button, "ROTATE (R)", play.phase == .Playing)
-	draw_button(menu_button, "MENU (ESC)")
+	draw_button(menu_button, play.has_goals ? "LEVELS (ESC)" : "MENU (ESC)")
 	draw_button(sound_button, muted ? "SOUND OFF (M)" : "SOUND ON (M)")
 	if msg != "" {
 		draw_text(x, 264, msg, msg_color, 1)
@@ -365,16 +471,61 @@ draw_panel :: proc() {
 	draw_text(x, 280, fmt.bprintf(turns[:], "TURN %d", play.turns), DIM, 1)
 }
 
+// What the level asks for, one line each, green once met.
+draw_goals :: proc(x, y: f32) {
+	gl := play.goals
+	y := y
+	put :: proc(x, y: f32, met: bool, text: string) {
+		draw_text(x, y, text, met ? GOOD : INK, 1)
+	}
+	if gl.min_score > 0 {
+		put(x, y, play.score >= gl.min_score, fmt.tprintf("SCORE %d/%d", play.score, gl.min_score))
+		y += 9
+	}
+	for id in game.Molecule_Id {
+		need := gl.molecules[id]
+		if need == 0 { continue }
+		have := id == .None ? game.molecules_made(&play) : play.made[id]
+		name := id == .None ? "MOLECULES" : game.MOLECULE_DEFS[id].name
+		put(x, y, have >= need, fmt.tprintf("%s %d/%d", name, have, need))
+		y += 9
+	}
+	finished := game.supply_empty(&play.supply)
+	if gl.use_whole_bag {
+		put(x, y, finished, fmt.tprintf("BAG LEFT %d", game.supply_remaining(&play.supply)))
+		y += 9
+	}
+	if limit, ok := gl.max_leftover.?; ok {
+		atoms := game.atoms_on_board(&play)
+		put(x, y, finished && atoms <= limit, fmt.tprintf("MAX LEFT %d (NOW %d)", limit, atoms))
+	}
+}
+
 draw_play :: proc() {
 	draw_board()
 	draw_panel()
 	if play.phase != .Playing {
-		fill_rect(BOARD_X, BOARD_Y, BOARD_PX, BOARD_PX, BACK, 0.88)
+		fill_rect(BOARD_X, BOARD_Y, BOARD_PX, BOARD_PX, BACK, 0.9)
 		cx := f32(BOARD_X + BOARD_PX / 2)
-		draw_centered(cx, 92, play.phase == .Out_Of_Moves ? "NO MOVES LEFT" : "ALL ATOMS USED", INK, 2)
-		buf: [24]u8
-		draw_centered(cx, 126, fmt.bprintf(buf[:], "SCORE %d", play.score), INK, 2)
-		draw_centered(cx, 168, "Click or press Enter", DIM, 1)
-		draw_centered(cx, 180, "to play again", DIM, 1)
+		title, note: string
+		color: u32 = INK
+		switch play.phase {
+		case .Won:
+			title, note, color = "LEVEL CLEAR!", "All goals met.", GOOD
+		case .Out_Of_Moves:
+			title, note = "NO MOVES LEFT", "Nothing in hand fits."
+		case .Out_Of_Atoms:
+			title, note = play.has_goals ? "GOALS MISSED" : "ALL ATOMS USED", "No atoms left."
+		case .Playing:
+		}
+		draw_centered(cx, 70, title, color, 2)
+		draw_centered(cx, 100, fmt.tprintf("SCORE %d", play.score), INK, 2)
+		draw_centered(cx, 132, note, DIM, 1)
+		primary := "PLAY AGAIN"
+		if play.has_goals {
+			primary = play.phase == .Won && has_next_level() ? "NEXT LEVEL" : "RETRY"
+		}
+		draw_button(overlay_primary_button, primary)
+		draw_button(overlay_secondary_button, play.has_goals ? "LEVELS (ESC)" : "MENU (ESC)")
 	}
 }
