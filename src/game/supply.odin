@@ -120,6 +120,12 @@ refill :: proc(s: ^Supply) {
 	}
 }
 
+// Change how many slots are shown (a tray growing as the player scores). New slots fill straight away.
+supply_set_size :: proc(s: ^Supply, size: int) {
+	s.size = clamp(size, 1, MAX_SLOTS)
+	refill(s)
+}
+
 supply_visible :: proc(s: ^Supply) -> []Kind {
 	return s.slots[:s.filled]
 }

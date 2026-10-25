@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## State of the repo
 
-Design is settled in `DESIGN.md` (rules, scoring table, art direction, level structure); read it before changing rules. Endless mode is playable in the browser (rules, supply, scoring, art, web layer); sound is in; the 20 levels (draft, listed in `DESIGN.md`) are playable from a level-select screen; progress is saved in the browser. Task status is in Coxswain (project `chem-grid`).
+Design is settled in `DESIGN.md` (rules, scoring table, art direction, level structure); read it before changing rules. Endless mode (a tray that grows from 1 to 6 slots as the score passes 1000, 2000, 5000, 10000, 20000: `TRAY_GROWTH_SCORES` in `play.odin`) is playable in the browser (rules, supply, scoring, art, web layer); sound is in; the 20 levels (draft, listed in `DESIGN.md`) are playable from a level-select screen; progress is saved in the browser. Task status is in Coxswain (project `chem-grid`).
 
 ```bash
 tools/test.sh                 # native tests of src/game + odin check of both packages for js_wasm32

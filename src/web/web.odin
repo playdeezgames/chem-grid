@@ -212,6 +212,9 @@ take_events :: proc() {
 				new_best = game.record_endless(&save, play.score)
 				store_save()
 			}
+		case .Tray_Grew:
+			set_message(GOOD, "NEW TRAY SLOT")
+			beep(.Win)
 		case .Won:
 			beep(.Win)
 			new_best = game.record_level(&save, play.level, play.score)

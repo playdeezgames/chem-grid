@@ -168,3 +168,53 @@ queue_front_stuck_ends_the_game_even_if_later_atoms_fit :: proc(t: ^testing.T) {
 	update_phase(&g)
 	testing.expect_value(t, g.phase, Phase.Out_Of_Moves) // He is previewed and would fit, but C is in front
 }
+
+@(test)
+endless_tray_size_follows_the_score :: proc(t: ^testing.T) {
+	cases := [?][2]int{{0, 1}, {999, 1}, {1000, 2}, {1999, 2}, {2000, 3}, {4999, 3}, {5000, 4}, {9999, 4}, {10000, 5}, {19999, 5}, {20000, 6}, {1_000_000, 6}}
+	for c in cases {
+		testing.expect_value(t, endless_tray_size(c[0]), c[1])
+	}
+}
+
+@(test)
+endless_starts_with_a_one_slot_tray :: proc(t: ^testing.T) {
+	g := game_endless(5)
+	testing.expect_value(t, g.supply.view, View.Tray)
+	testing.expect_value(t, g.supply.size, 1)
+	testing.expect_value(t, len(supply_visible(&g.supply)), 1)
+}
+
+@(test)
+endless_tray_gains_a_slot_when_the_score_passes_a_threshold :: proc(t: ^testing.T) {
+	g := game_endless(5)
+	g.score = 1000 // as if a molecule had just scored; the next placement notices
+	out: Placements
+	kind, _ := in_hand(&g)
+	valid_placements(&g.board, kind, &out)
+	g.rot = int(out.items[0].rot)
+	step(&g, Place{int(out.items[0].row), int(out.items[0].col)})
+	testing.expect(t, g.turns > 0)
+	testing.expect_value(t, g.supply.size, 2)
+	testing.expect_value(t, len(supply_visible(&g.supply)), 2)
+	testing.expect(t, has_event(&g, .Tray_Grew))
+	// The size never shrinks and caps at six.
+	g.score = 1_000_000
+	for _ in 0 ..< 3 {
+		out: Placements
+		kind, ok := in_hand(&g)
+		if !ok || g.phase != .Playing { break }
+		valid_placements(&g.board, kind, &out)
+		if out.count == 0 { break }
+		g.rot = int(out.items[0].rot)
+		step(&g, Place{int(out.items[0].row), int(out.items[0].col)})
+	}
+	testing.expect_value(t, g.supply.size, 6)
+}
+
+@(test)
+level_tray_size_stays_what_the_level_says :: proc(t: ^testing.T) {
+	g := game_level(4, 1) // Ammonia: a tray of 4
+	testing.expect_value(t, g.supply.view, View.Tray)
+	testing.expect_value(t, g.supply.size, 4)
+}

@@ -34,6 +34,7 @@ Event_Kind :: enum u8 {
 	Game_Over,
 	Supply_Empty,
 	Won,
+	Tray_Grew, // endless mode: a new tray slot opened
 }
 
 Event :: struct {
@@ -65,8 +66,8 @@ Game :: struct {
 	level:          int,         // index into LEVELS, when has_goals
 }
 
-// Endless mode: a random queue whose helium weight climbs by one every HE_EVERY turns,
-// so every game ends.
+// Endless mode: a tray that starts with one slot and gains one at each of these scores (six at most),
+// filled from a random supply whose helium weight climbs by one every HE_EVERY turns, so every game ends.
 ENDLESS_WEIGHTS := [Kind]int {
 	.H          = 6,
 	.O_Straight = 2,
@@ -75,8 +76,17 @@ ENDLESS_WEIGHTS := [Kind]int {
 	.C          = 1,
 	.He         = 1,
 }
-ENDLESS_PREVIEW :: 3
+TRAY_GROWTH_SCORES :: [5]int{1000, 2000, 5000, 10000, 20000}
 HE_EVERY :: 10
+
+// Tray slots an endless game has at this score.
+endless_tray_size :: proc(score: int) -> int {
+	size := 1
+	for threshold in TRAY_GROWTH_SCORES {
+		if score >= threshold { size += 1 }
+	}
+	return size
+}
 
 game_start :: proc(supply: Supply) -> Game {
 	g := Game {
@@ -87,7 +97,7 @@ game_start :: proc(supply: Supply) -> Game {
 }
 
 game_endless :: proc(seed: u64) -> Game {
-	g := game_start(supply_weighted(ENDLESS_WEIGHTS, .Queue, ENDLESS_PREVIEW, seed))
+	g := game_start(supply_weighted(ENDLESS_WEIGHTS, .Tray, endless_tray_size(0), seed))
 	g.endless = true
 	g.he_base_weight = ENDLESS_WEIGHTS[.He]
 	return g
@@ -223,6 +233,10 @@ step :: proc(g: ^Game, cmd: Command) {
 		}
 		if g.endless {
 			g.supply.weights[.He] = g.he_base_weight + g.turns / HE_EVERY
+			if size := endless_tray_size(g.score); size > g.supply.size {
+				supply_set_size(&g.supply, size)
+				emit(g, {kind = .Tray_Grew})
+			}
 		}
 		update_phase(g)
 	}
