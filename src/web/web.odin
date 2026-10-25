@@ -413,6 +413,54 @@ draw_select :: proc() {
 	draw_button(back_button, "BACK (ESC)")
 }
 
+// Can the atom in hand go in this empty cell?
+Hint :: enum {
+	Blocked, // at no rotation
+	Rotate,  // only after rotating it
+	Ready,   // at the current rotation
+}
+
+HINT_TINT := [Hint]u32{.Blocked = 0xd62828, .Rotate = 0xf2b705, .Ready = 0x2e9e4f}
+HINT_ICON := [Hint]u32{.Blocked = 0x7a1414, .Rotate = 0x7a5a00, .Ready = 0x145a2c}
+
+// 7 by 7 pixel icons so the hint does not rely on colour alone: x, ?, and a check mark.
+HINT_BITMAPS := [Hint][7]string {
+	.Blocked = {"X.....X", ".X...X.", "..X.X..", "...X...", "..X.X..", ".X...X.", "X.....X"},
+	.Rotate  = {".XXXXX.", "X.....X", "......X", "....XX.", "...X...", ".......", "...X..."},
+	.Ready   = {".......", "......X", ".....XX", "X...XX.", "XX.XX..", ".XXX...", "..X...."},
+}
+
+cell_hint :: proc(kind: game.Kind, row, col: int) -> Hint {
+	if game.valid_placement(&play.board, row, col, kind, play.rot) {
+		return .Ready
+	}
+	for rot in 0 ..< game.rotation_count(kind) {
+		if game.valid_placement(&play.board, row, col, kind, rot) {
+			return .Rotate
+		}
+	}
+	return .Blocked
+}
+
+draw_hint :: proc(h: Hint, x, y: f32) {
+	fill_rect(x + 1, y + 1, game.TILE - 2, game.TILE - 2, HINT_TINT[h], 0.3)
+	// Icon at 2x, centred, drawn as horizontal runs.
+	ox := x + (game.TILE - 14) / 2
+	oy := y + (game.TILE - 14) / 2
+	for row, ry in HINT_BITMAPS[h] {
+		start := -1
+		for cx in 0 ..= len(row) {
+			on := cx < len(row) && row[cx] == 'X'
+			if on && start < 0 {
+				start = cx
+			} else if !on && start >= 0 {
+				fill_rect(ox + f32(start * 2), oy + f32(ry * 2), f32((cx - start) * 2), 2, HINT_ICON[h], 0.6)
+				start = -1
+			}
+		}
+	}
+}
+
 draw_board :: proc() {
 	for row in 0 ..< game.BOARD_SIZE {
 		for col in 0 ..< game.BOARD_SIZE {
@@ -426,6 +474,15 @@ draw_board :: proc() {
 		}
 	}
 	kind, have := game.in_hand(&play)
+	if have && play.phase == .Playing {
+		for row in 0 ..< game.BOARD_SIZE {
+			for col in 0 ..< game.BOARD_SIZE {
+				if !play.board.cells[row][col].occupied {
+					draw_hint(cell_hint(kind, row, col), f32(BOARD_X + col * game.TILE), f32(BOARD_Y + row * game.TILE))
+				}
+			}
+		}
+	}
 	if have && hover_set && play.phase == .Playing {
 		x := f32(BOARD_X + hover_col * game.TILE)
 		y := f32(BOARD_Y + hover_row * game.TILE)
