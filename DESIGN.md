@@ -19,7 +19,7 @@ Status: draft, rules as stated by the user on October 25, 2026. Open questions a
   - Random queue with a visible preview.
   - Tray: the player picks which atom to place from a hand.
   - Fixed bag: a set list of atoms, configurable as levels or missions.
-- **Game over:** when the atom to place has no valid cell and rotation. With a tray this is read as: no atom in the tray can be placed (to confirm).
+- **Game over:** when the atom to place has no valid cell and rotation. With a tray: no atom in the tray can be placed. With a queue: the front atom can't be placed (previewed atoms don't count, since they can't be played yet). Implemented this way in `src/game/play.odin`.
 - **Scoring:** points by the atoms in the molecule, plus extra for recognised molecules (see the Scoring section). Recognised molecules can also be a level's objectives.
 
 - **Oxygen comes in two forms, generated as either straight or bent.** They are effectively different pieces (separate supply entries, separate sprites, 2 vs 4 rotations) but both are O and score the same. Without doubles, recognised molecules are single-bond only (H2O, CH4, NH3, H2O2, CH3OH, C2H6, ...).
