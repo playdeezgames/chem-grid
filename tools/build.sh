@@ -8,4 +8,5 @@ mkdir -p build/web
 odin build src/web -collection:cg=src -target:js_wasm32 -out:build/web/game.wasm -o:$opt -vet-shadowing -vet-unused
 cp "$(odin root)/core/sys/wasm/js/odin.js" build/web/
 cp web/index.html build/web/
+python3 tools/gen_atlas.py assets/art/world.json build/web/art.png
 echo "built build/web ($opt)"

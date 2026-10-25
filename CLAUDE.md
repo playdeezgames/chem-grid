@@ -21,6 +21,10 @@ Layout: `src/game` is the pure rules (no platform imports; clock and RNG passed 
 - **Anvil** (MCP server `anvil-prod`, source `/home/yermom/git/anvil-of-splorr`) makes sprites, tiles, maps, palettes and sounds (`world_*`, `sprite_*`, `map_*`, `sound_*`, `render_*`). Worlds are saved as JSON in `/home/yermom/anvil-worlds`; use `world_export` / `sound_export` to get assets into the build, and keep the export in the repo (`assets/art/world.json`).
 - **The BOK** (`/home/yermom/git/bok-of-splorr/splorr`, an additional working directory) is the user's knowledge base. Read `Home.md` first, then `Tech/Odin wasm recipe.md` (build, frame loop, input, and a catalogue of architecture variants to pick from), `Tech/Release standard.md`, `Tech/Shipping to itch.io.md`, `Tech/jsfxr sound effects.md` and `Gotchas.md`. Put new lessons in the BOK's `Gotchas.md`, not here. A sibling game to crib from: `/home/yermom/git/tggd-20seconds` (pure `src/game`, thin `src/web`, Anvil atlas and WAVs, touch buttons, ship script).
 
+## Art
+
+`assets/art/world.json` is an Anvil world export (copy to `/home/yermom/anvil-worlds/chem-grid.json` to open it with `world_open`): 32x32 sprites in one sprite set `art`, 16-colour palette (index 0, the board light, is the transparent colour of balls and bonds). `tools/gen_atlas.py` packs them into `build/web/art.png` in sprite-set order (run by `tools/build.sh`), and the `Sprite` enum in `src/game/art.odin` must list them in the same order. An atom is drawn as a bond stick for each side it has (`bond_north` etc.), then its ball (`ball_h` ...) on top, so nothing is rotated at draw time. `tools/gen_art.py` made the first version of the world (it reads a sibling game's world only as a schema template); after hand-editing in Anvil and re-exporting, do not rerun it over the export.
+
 ## Odin/wasm notes
 
 - `tools/test.sh` also runs `odin check -vet-shadowing -vet-unused` on both packages for `js_wasm32`, because `odin check` does not apply those vet flags on its own; the build uses them too.

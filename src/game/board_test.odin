@@ -150,3 +150,14 @@ full_board_has_no_placement :: proc(t: ^testing.T) {
 		testing.expect(t, !has_placement(&b, kind))
 	}
 }
+
+@(test)
+sprite_enum_matches_the_art_world :: proc(t: ^testing.T) {
+	// The atlas packs the world's sprites in order; the enum must have as many.
+	testing.expect_value(t, len(Sprite), 12)
+	testing.expect_value(t, ball_sprite(.O_Bent), Sprite.Ball_O)
+	testing.expect_value(t, ball_sprite(.O_Straight), Sprite.Ball_O)
+	for s in Side {
+		testing.expect_value(t, int(bond_sprite(s)) - int(Sprite.Bond_North), int(s))
+	}
+}
