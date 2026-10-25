@@ -24,7 +24,7 @@ Status: draft, rules as stated by the user on October 25, 2026. Open questions a
 
 - **Oxygen comes in two forms, generated as either straight or bent.** They are effectively different pieces (separate supply entries, separate sprites, 2 vs 4 rotations) but both are O and score the same. Without doubles, recognised molecules are single-bond only (H2O, CH4, NH3, H2O2, CH3OH, C2H6, ...).
 - **Isolated placement is allowed:** only the bond-matching rules constrain a placement; an atom need not touch another.
-- **Dead molecules** (can never be completed) are just clutter, like helium. No cleanup action.
+- **Dead molecules** (can never be completed) are just clutter, like helium. No cleanup action. Found while testing: on this grid any set of required bonds on an empty cell can be filled by some atom kind (sizes 0 to 4 all have a kind), so a structure is only ever dead for lack of the right atom in the supply (or the cell filled by something else), never by geometry alone.
 - **One molecule per placement:** a placement can complete at most one molecule, because completion can only change the connected structure the new atom belongs to. So there is no combo or simultaneous-completion rule. A unit test should assert this.
 
 - **Helium** is just another weighted atom: a weight in the queue, a listed entry in a bag or tray. A level may have none.
