@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## State of the repo
 
-Design is settled in `DESIGN.md` (rules, scoring table, art direction, level structure); read it before changing rules. Endless mode is playable in the browser (rules, supply, scoring, art, web layer); sound is in; levels and saves are not built yet. Task status is in Coxswain (project `chem-grid`).
+Design is settled in `DESIGN.md` (rules, scoring table, art direction, level structure); read it before changing rules. Endless mode is playable in the browser (rules, supply, scoring, art, web layer); sound is in; the level table and win/lose rules exist in the rules package but have no screen yet; saves are not built. Task status is in Coxswain (project `chem-grid`).
 
 ```bash
 tools/test.sh                 # native tests of src/game + odin check of both packages for js_wasm32
@@ -24,6 +24,10 @@ Layout: `src/game` is the pure rules (no platform imports; clock and RNG passed 
 ## Art
 
 `assets/art/world.json` is an Anvil world export (copy to `/home/yermom/anvil-worlds/chem-grid.json` to open it with `world_open`): 32x32 sprites in one sprite set `art`, 16-colour palette (index 0, the board light, is the transparent colour of balls and bonds). `tools/gen_atlas.py` packs them into `build/web/art.png` in sprite-set order (run by `tools/build.sh`), and the `Sprite` enum in `src/game/art.odin` must list them in the same order. An atom is drawn as a bond stick for each side it has (`bond_north` etc.), then its ball (`ball_h` ...) on top, so nothing is rotated at draw time. `tools/gen_art.py` made the first version of the world (it reads a sibling game's world only as a schema template); after hand-editing in Anvil and re-exporting, do not rerun it over the export.
+
+## Levels
+
+`src/game/levels.odin`: a `Level` is a supply (Bag with an ordered string of atoms `H O I(straight O) N C E(helium)`, optionally shuffled; or Weighted) shown as a Queue or Tray of `size`, plus `Goals` (min score; N of a named molecule, or of any with the `.None` entry; use the whole bag; at most N atoms left when the bag runs out). Goals combine; `game_level(index, seed)` makes a `Game` with `has_goals`, and `goals_met` is checked after each placement (goals about the end of the supply can only be met once it is empty). `Phase.Won` and `Event_Kind.Won` are new; a level whose bag runs dry with goals unmet ends as `Out_Of_Atoms`. Enum-indexed literals with missing entries need `#partial`. `levels_test.odin` holds a solver (DFS with a state hash; it tries connecting moves first and, unless `exhaustive`, only a few start cells for isolated atoms, so it can prove "winnable" but not "unwinnable") that every fixed-bag level must pass; add every new fixed-bag level to `LEVELS` and the test covers it. Weighted levels have no proof.
 
 ## Web layer
 

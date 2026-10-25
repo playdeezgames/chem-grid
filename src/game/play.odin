@@ -6,7 +6,8 @@ package game
 Phase :: enum u8 {
 	Playing,
 	Out_Of_Moves, // none of the atoms on offer can be placed anywhere: the attempt is over
-	Out_Of_Atoms, // a finite supply has been used up
+	Out_Of_Atoms, // a finite supply has been used up (in a level, with its goals unmet)
+	Won,          // a level's goals are all met
 }
 
 Select :: struct {
@@ -32,6 +33,7 @@ Event_Kind :: enum u8 {
 	Completed, // a molecule vanished; see the other fields
 	Game_Over,
 	Supply_Empty,
+	Won,
 }
 
 Event :: struct {
@@ -58,6 +60,9 @@ Game :: struct {
 	event_count:    int,
 	endless:        bool,        // helium weight rises as the game goes on
 	he_base_weight: int,
+	has_goals:      bool,        // a level: the game is won when goals are met
+	goals:          Goals,
+	level:          int,         // index into LEVELS, when has_goals
 }
 
 // Endless mode: a random queue whose helium weight climbs by one every HE_EVERY turns,
@@ -86,6 +91,47 @@ game_endless :: proc(seed: u64) -> Game {
 	g.endless = true
 	g.he_base_weight = ENDLESS_WEIGHTS[.He]
 	return g
+}
+
+// Number of atoms on the board (helium included).
+atoms_on_board :: proc(g: ^Game) -> int {
+	n := 0
+	for row in g.board.cells {
+		for c in row {
+			if c.occupied { n += 1 }
+		}
+	}
+	return n
+}
+
+molecules_made :: proc(g: ^Game) -> int {
+	n := 0
+	for k in g.made { n += k }
+	return n
+}
+
+// Are all of the level's goals met right now? The goals about the end of the supply (use the whole bag,
+// leave at most N atoms) can only be met once the supply is empty; the others can be met at any time.
+goals_met :: proc(g: ^Game) -> bool {
+	gl := g.goals
+	if g.score < gl.min_score {
+		return false
+	}
+	for id in Molecule_Id {
+		need := gl.molecules[id]
+		have := id == .None ? molecules_made(g) : g.made[id]
+		if have < need {
+			return false
+		}
+	}
+	finished := supply_empty(&g.supply)
+	if gl.use_whole_bag && !finished {
+		return false
+	}
+	if limit, ok := gl.max_leftover.?; ok && (!finished || atoms_on_board(g) > limit) {
+		return false
+	}
+	return true
 }
 
 // The atom in hand, if there is one.
@@ -170,6 +216,11 @@ step :: proc(g: ^Game, cmd: Command) {
 		}
 		g.selected = 0
 		g.rot = 0
+		if g.has_goals && goals_met(g) {
+			g.phase = .Won
+			emit(g, {kind = .Won})
+			return
+		}
 		if g.endless {
 			g.supply.weights[.He] = g.he_base_weight + g.turns / HE_EVERY
 		}
