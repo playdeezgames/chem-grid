@@ -130,3 +130,13 @@ helium_scores_nothing :: proc(t: ^testing.T) {
 	s := score_molecule(&m)
 	testing.expect_value(t, s, Score{})
 }
+
+@(test)
+helium_is_not_part_of_a_skeleton :: proc(t: ^testing.T) {
+	b: Board
+	testing.expect(t, place(&b, 3, 3, .He, 0))
+	m := molecule_at(&b, 3, 3)
+	sk, ok := skeleton_of(&m)
+	testing.expect(t, ok)
+	testing.expect_value(t, sk.count, 0)
+}

@@ -85,8 +85,8 @@ skeleton_of :: proc(m: ^Molecule) -> (sk: Skeleton, ok: bool) {
 		index[i] = -1
 		element: Element
 		#partial switch m.kinds[i] {
-		case .H:
-			continue
+		case .H, .He:
+			continue // not part of the skeleton (helium has no bonds, so it is alone anyway)
 		case .O_Straight, .O_Bent:
 			element = .O
 		case .N:

@@ -76,6 +76,35 @@ Light background confirmed (the "dark lab" pick was a mistake). Note: black C ag
 - **Objectives, combinable per level:** reach a score; make N of a named molecule; use up the whole bag without game over; finish with at most N leftover atoms on the board. Win when all of a level's objectives are met; game over ends the attempt.
 - **Level data is an Odin table in the pure rules package** (not JSON), so native tests can validate every level, and a solver test (as in Roomba Rights) can prove each fixed-bag level is winnable.
 
+## The 20 levels (draft, October 25, 2026)
+
+Source of truth is the `LEVELS` table in `src/game/levels.odin`; every fixed-bag level is proved winnable by the solver test. Bags list the atoms in arrival order (H, O bent, I straight O, N, C, E helium). "Queue n" shows n atoms but only the front can be placed; "Tray n" lets you pick.
+
+| # | Name | Supply | Goal | What it teaches |
+|---|---|---|---|---|
+| 1 | First Bond | HH, queue 2 | one H2 | place, rotate, match |
+| 2 | Water | HOH, queue 3 | one H2O, use the bag | bent oxygen |
+| 3 | Pair Up | HHHH, queue 3 | two H2, use the bag | more than one molecule |
+| 4 | Straight Shooter | HIH, queue 3 | one H2O, use the bag | straight oxygen (the atoms are in a line) |
+| 5 | Ammonia | HNHH, tray 4 | one NH3, use the bag | nitrogen, the tray |
+| 6 | Methane | CHHHH, tray 5 | one CH4, use the bag | carbon |
+| 7 | Peroxide | HOOH, queue 4 | one H2O2, use the bag | chains |
+| 8 | Noble Neighbours | EHOHE, queue 3 | one H2O, use the bag, at most 2 atoms left | helium clutter |
+| 9 | Two Waters | HOHHOH shuffled, queue 3 | two H2O, use the bag | adapting to a random order |
+| 10 | Methane and a Friend | HHCHHE, tray 3 | one CH4, use the bag, at most 1 left | helium with a small tray |
+| 11 | Double Duty | HHHNHOH, tray 4 | one NH3 and one H2O, use the bag | two molecules from one tray |
+| 12 | Methanol | CHHHOH, tray 6 | one CH3OH, use the bag | mixed skeleton |
+| 13 | Hydrazine | NNHHHH, tray 6 | one N2H4, use the bag | nitrogen chain |
+| 14 | Score Race | random queue 3, helium weight 5 of 21 | reach 3000 | free play toward a target (a simple greedy bot wins about 79 of 100) |
+| 15 | Methylamine | CNHHHHH, tray 6 | one CH3NH2, use the bag | C and N together |
+| 16 | Clean Sweep | HOHNHHH, tray 4 | NH3 and H2O, use the bag, nothing left | no waste |
+| 17 | Ethane | CCHHHHHH, tray 6 | one C2H6, use the bag | bigger skeleton |
+| 18 | Ethanol | CCOHHHHHH, tray 6 | one C2H5OH, use the bag | three-atom skeleton |
+| 19 | Same Atoms, Ether | CICHHHHHH, tray 6 | one CH3OCH3, use the bag | isomers: the same atoms as ethanol with the oxygen in the middle, and it must be straight (a bent oxygen would force two hydrogens onto one cell) |
+| 20 | The Ring | CCCCHHHHHHHH, tray 6 | one C4H8, use the bag | a ring on a 2x2 square |
+
+Found while building these: a bent oxygen between two carbons cannot work (the carbons end up diagonal and one cell would need a hydrogen with two bonds), so the ether level uses a straight oxygen.
+
 ## Open questions
 
 - The 20 levels themselves: the progression curve and what each introduces (needs a later session once the rules package exists).

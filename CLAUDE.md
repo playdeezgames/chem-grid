@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## State of the repo
 
-Design is settled in `DESIGN.md` (rules, scoring table, art direction, level structure); read it before changing rules. Endless mode is playable in the browser (rules, supply, scoring, art, web layer); sound is in; levels (6 placeholders) are playable from a level-select screen; progress is saved in the browser. Task status is in Coxswain (project `chem-grid`).
+Design is settled in `DESIGN.md` (rules, scoring table, art direction, level structure); read it before changing rules. Endless mode is playable in the browser (rules, supply, scoring, art, web layer); sound is in; the 20 levels (draft, listed in `DESIGN.md`) are playable from a level-select screen; progress is saved in the browser. Task status is in Coxswain (project `chem-grid`).
 
 ```bash
 tools/test.sh                 # native tests of src/game + odin check of both packages for js_wasm32
@@ -27,7 +27,7 @@ Layout: `src/game` is the pure rules (no platform imports; clock and RNG passed 
 
 ## Levels
 
-`src/game/levels.odin`: a `Level` is a supply (Bag with an ordered string of atoms `H O I(straight O) N C E(helium)`, optionally shuffled; or Weighted) shown as a Queue or Tray of `size`, plus `Goals` (min score; N of a named molecule, or of any with the `.None` entry; use the whole bag; at most N atoms left when the bag runs out). Goals combine; `game_level(index, seed)` makes a `Game` with `has_goals`, and `goals_met` is checked after each placement (goals about the end of the supply can only be met once it is empty). `Phase.Won` and `Event_Kind.Won` are new; a level whose bag runs dry with goals unmet ends as `Out_Of_Atoms`. Enum-indexed literals with missing entries need `#partial`. `levels_test.odin` holds a solver (DFS with a state hash; it tries connecting moves first and, unless `exhaustive`, only a few start cells for isolated atoms, so it can prove "winnable" but not "unwinnable") that every fixed-bag level must pass; add every new fixed-bag level to `LEVELS` and the test covers it. Weighted levels have no proof.
+`src/game/levels.odin`: a `Level` is a supply (Bag with an ordered string of atoms `H O I(straight O) N C E(helium)`, optionally shuffled; or Weighted) shown as a Queue or Tray of `size`, plus `Goals` (min score; N of a named molecule, or of any with the `.None` entry; use the whole bag; at most N atoms left when the bag runs out). Goals combine; `game_level(index, seed)` makes a `Game` with `has_goals`, and `goals_met` is checked after each placement (goals about the end of the supply can only be met once it is empty). `Phase.Won` and `Event_Kind.Won` are new; a level whose bag runs dry with goals unmet ends as `Out_Of_Atoms`. Enum-indexed literals with missing entries need `#partial`. `levels_test.odin` holds a solver (DFS with a state hash; it tries connecting moves first and, unless `exhaustive`, only a few start cells for isolated atoms, so it can prove "winnable" but not "unwinnable") that every fixed-bag level must pass; add every new fixed-bag level to `LEVELS` and the test covers it. Weighted levels have no proof; a greedy-bot test (`greedy_win`) checks they stay winnable. The solver prunes with heuristics that only ever lose solutions, never invent one: heavy atoms before hydrogen and helium, no unrequested molecules, and every unfinished skeleton must still fit a needed molecule (`can_still_finish`). Level names must be 20 characters or fewer to fit the side panel.
 
 ## Saves
 

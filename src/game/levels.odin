@@ -20,8 +20,10 @@ Level :: struct {
 	goals:   Goals,
 }
 
-// A first few levels to prove the machinery; the real set is designed in a later task.
+// The levels, easiest first. Bags: H, O (bent), I (straight O), N, C, E (helium), in the order they arrive.
+// Every fixed-bag level is proved winnable by the solver test (levels_test.odin).
 LEVELS := [?]Level {
+	// -- one molecule at a time --
 	{
 		name = "First Bond",
 		source = .Bag, view = .Queue, size = 2,
@@ -35,16 +37,41 @@ LEVELS := [?]Level {
 		goals = {molecules = #partial [Molecule_Id]int{.H2O = 1}, use_whole_bag = true},
 	},
 	{
+		name = "Pair Up",
+		source = .Bag, view = .Queue, size = 3,
+		bag = "HHHH",
+		goals = {molecules = #partial [Molecule_Id]int{.H2 = 2}, use_whole_bag = true},
+	},
+	{
+		name = "Straight Shooter",
+		source = .Bag, view = .Queue, size = 3,
+		bag = "HIH",
+		goals = {molecules = #partial [Molecule_Id]int{.H2O = 1}, use_whole_bag = true},
+	},
+	{
 		name = "Ammonia",
 		source = .Bag, view = .Tray, size = 4,
 		bag = "HNHH",
 		goals = {molecules = #partial [Molecule_Id]int{.NH3 = 1}, use_whole_bag = true},
 	},
 	{
-		name = "Methane and a Friend",
-		source = .Bag, view = .Tray, size = 3,
-		bag = "HHCHHE",
-		goals = {molecules = #partial [Molecule_Id]int{.CH4 = 1}, use_whole_bag = true, max_leftover = 1},
+		name = "Methane",
+		source = .Bag, view = .Tray, size = 5,
+		bag = "CHHHH",
+		goals = {molecules = #partial [Molecule_Id]int{.CH4 = 1}, use_whole_bag = true},
+	},
+	{
+		name = "Peroxide",
+		source = .Bag, view = .Queue, size = 4,
+		bag = "HOOH",
+		goals = {molecules = #partial [Molecule_Id]int{.H2O2 = 1}, use_whole_bag = true},
+	},
+	// -- helium joins in --
+	{
+		name = "Noble Neighbours",
+		source = .Bag, view = .Queue, size = 3,
+		bag = "EHOHE",
+		goals = {molecules = #partial [Molecule_Id]int{.H2O = 1}, use_whole_bag = true, max_leftover = 2},
 	},
 	{
 		name = "Two Waters",
@@ -54,10 +81,72 @@ LEVELS := [?]Level {
 		goals = {molecules = #partial [Molecule_Id]int{.H2O = 2}, use_whole_bag = true},
 	},
 	{
-		name = "Keep Going",
+		name = "Methane and a Friend",
+		source = .Bag, view = .Tray, size = 3,
+		bag = "HHCHHE",
+		goals = {molecules = #partial [Molecule_Id]int{.CH4 = 1}, use_whole_bag = true, max_leftover = 1},
+	},
+	// -- several molecules, bigger ones --
+	{
+		name = "Double Duty",
+		source = .Bag, view = .Tray, size = 4,
+		bag = "HHHNHOH",
+		goals = {molecules = #partial [Molecule_Id]int{.NH3 = 1, .H2O = 1}, use_whole_bag = true},
+	},
+	{
+		name = "Methanol",
+		source = .Bag, view = .Tray, size = 6,
+		bag = "CHHHOH",
+		goals = {molecules = #partial [Molecule_Id]int{.CH3OH = 1}, use_whole_bag = true},
+	},
+	{
+		name = "Hydrazine",
+		source = .Bag, view = .Tray, size = 6,
+		bag = "NNHHHH",
+		goals = {molecules = #partial [Molecule_Id]int{.N2H4 = 1}, use_whole_bag = true},
+	},
+	{
+		name = "Score Race",
 		source = .Weighted, view = .Queue, size = 3,
-		weights = #partial [Kind]int{.H = 6, .O_Bent = 3, .N = 2, .C = 1, .He = 1},
-		goals = {min_score = 500},
+		weights = #partial [Kind]int{.H = 6, .O_Bent = 3, .O_Straight = 1, .N = 2, .C = 1, .He = 5},
+		goals = {min_score = 3000},
+	},
+	{
+		name = "Methylamine",
+		source = .Bag, view = .Tray, size = 6,
+		bag = "CNHHHHH",
+		goals = {molecules = #partial [Molecule_Id]int{.CH3NH2 = 1}, use_whole_bag = true},
+	},
+	{
+		name = "Clean Sweep",
+		source = .Bag, view = .Tray, size = 4,
+		bag = "HOHNHHH",
+		goals = {molecules = #partial [Molecule_Id]int{.NH3 = 1, .H2O = 1}, use_whole_bag = true, max_leftover = 0},
+	},
+	// -- the big ones --
+	{
+		name = "Ethane",
+		source = .Bag, view = .Tray, size = 6,
+		bag = "CCHHHHHH",
+		goals = {molecules = #partial [Molecule_Id]int{.C2H6 = 1}, use_whole_bag = true},
+	},
+	{
+		name = "Ethanol",
+		source = .Bag, view = .Tray, size = 6,
+		bag = "CCOHHHHHH",
+		goals = {molecules = #partial [Molecule_Id]int{.C2H5OH = 1}, use_whole_bag = true},
+	},
+	{
+		name = "Same Atoms, Ether",
+		source = .Bag, view = .Tray, size = 6,
+		bag = "CICHHHHHH",
+		goals = {molecules = #partial [Molecule_Id]int{.CH3OCH3 = 1}, use_whole_bag = true},
+	},
+	{
+		name = "The Ring",
+		source = .Bag, view = .Tray, size = 6,
+		bag = "CCCCHHHHHHHH",
+		goals = {molecules = #partial [Molecule_Id]int{.C4H8 = 1}, use_whole_bag = true},
 	},
 }
 
