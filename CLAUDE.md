@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## State of the repo
 
-Design is settled in `DESIGN.md` (rules, scoring table, art direction, level structure); read it before changing rules. The scaffold exists and renders an empty 8x8 board; the game itself is not built yet. Task status is in Coxswain (project `chem-grid`).
+Design is settled in `DESIGN.md` (rules, scoring table, art direction, level structure); read it before changing rules. Endless mode is playable in the browser (rules, supply, scoring, art, web layer); levels, saves and sound are not built yet. Task status is in Coxswain (project `chem-grid`).
 
 ```bash
 tools/test.sh                 # native tests of src/game + odin check of both packages for js_wasm32
@@ -24,6 +24,10 @@ Layout: `src/game` is the pure rules (no platform imports; clock and RNG passed 
 ## Art
 
 `assets/art/world.json` is an Anvil world export (copy to `/home/yermom/anvil-worlds/chem-grid.json` to open it with `world_open`): 32x32 sprites in one sprite set `art`, 16-colour palette (index 0, the board light, is the transparent colour of balls and bonds). `tools/gen_atlas.py` packs them into `build/web/art.png` in sprite-set order (run by `tools/build.sh`), and the `Sprite` enum in `src/game/art.odin` must list them in the same order. An atom is drawn as a bond stick for each side it has (`bond_north` etc.), then its ball (`ball_h` ...) on top, so nothing is rotated at draw time. `tools/gen_art.py` made the first version of the world (it reads a sibling game's world only as a schema template); after hand-editing in Anvil and re-exporting, do not rerun it over the export.
+
+## Web layer
+
+`src/web/web.odin` is the whole page logic: screens (`Title`, `Play`), drawing through three imports (`fill_rect`, `blit(sprite, x, y, alpha)`, `draw_text(x, y, text, rgb, scale)`), and exports the page calls (`pointer_move`, `pointer_down(x, y, precise)`, `pointer_leave`, `rotate_input`, `qa_phase`). Coordinates are the 400x300 logical screen; the board is at (8, 8) and the panel at x = 276. A mouse places on click and shows a ghost on hover; a finger (`precise` = 0) selects a cell on the first tap and places on a second tap at the same cell. Text is DINOBYTE (`assets/font/dbyte_1x.png`, 6x8 cells, CC BY 4.0, credited on the title screen and to be on the itch page), tinted at draw time in `web/index.html`; keep that credit. To exercise a whole game without playing it, run a loop in the browser console that dispatches `pointerdown` events at random cells until `memory.exports.qa_phase()` is no longer 1 (the pane repaints only after a real mouse event, so hover once before a screenshot).
 
 ## Odin/wasm notes
 
