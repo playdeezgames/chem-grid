@@ -7,6 +7,8 @@ Pos :: struct {
 // A connected structure of bonded atoms.
 Molecule :: struct {
 	cells:    [BOARD_SIZE * BOARD_SIZE]Pos,
+	kinds:    [BOARD_SIZE * BOARD_SIZE]Kind, // what each cell held, so scoring still works after removal
+	sides:    [BOARD_SIZE * BOARD_SIZE]Sides,
 	count:    int,
 	bonds:    int,  // bonds inside the structure, each counted once
 	complete: bool, // no bond faces an empty cell, and there is at least one bond
@@ -43,6 +45,11 @@ molecule_at :: proc(board: ^Board, row, col: int) -> Molecule {
 				m.count += 1
 			}
 		}
+	}
+	for i in 0 ..< m.count {
+		cell := board.cells[m.cells[i].row][m.cells[i].col]
+		m.kinds[i] = cell.kind
+		m.sides[i] = cell.bonds
 	}
 	m.bonds = bond_ends / 2
 	m.complete = !open && m.bonds > 0
