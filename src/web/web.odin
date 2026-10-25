@@ -17,6 +17,8 @@ foreign canvas {
 	blit :: proc(sprite: i32, x, y: f32, alpha: f32) ---
 	// DINOBYTE text, 6 by 8 pixel cells times scale; x, y is the top-left.
 	draw_text :: proc(x, y: f32, text: string, rgb: u32, scale: i32) ---
+	// Play sound number `sound` (game.Sound). The page unlocks audio on the first key or pointer press.
+	play_sound :: proc(sound: i32) ---
 }
 
 INK :: 0x2b2d42
@@ -50,6 +52,7 @@ msg_buf: [40]u8
 msg: string
 msg_color: u32
 msg_time: f32
+muted: bool
 
 main :: proc() {
 	js.add_window_event_listener(.Key_Down, nil, on_key)
@@ -75,8 +78,9 @@ in_rect :: proc(r: Rect, x, y: f32) -> bool {
 
 BUTTON_X :: f32(PANEL_X)
 BUTTON_W :: f32(120)
-rotate_button := Rect{BUTTON_X, 196, BUTTON_W, 20}
-menu_button := Rect{BUTTON_X, 222, BUTTON_W, 20}
+rotate_button := Rect{BUTTON_X, 190, BUTTON_W, 20}
+menu_button := Rect{BUTTON_X, 214, BUTTON_W, 20}
+sound_button := Rect{BUTTON_X, 238, BUTTON_W, 20}
 start_button := Rect{140, 150, 120, 28}
 
 slot_rect :: proc(i: int) -> Rect {
@@ -92,16 +96,39 @@ cell_at :: proc(x, y: f32) -> (row, col: int, ok: bool) {
 
 // ---- input ----
 
+beep :: proc(sound: game.Sound) {
+	if !muted {
+		play_sound(i32(sound))
+	}
+}
+
+// Messages and sounds for what the last step did.
 take_events :: proc() {
+	placed, completed, over := false, false, false
 	for e in game.events(&play) {
 		#partial switch e.kind {
+		case .Placed:
+			placed = true
+		case .Rotated:
+			beep(.Rotate)
 		case .Invalid:
 			set_message(ACCENT, "NO ROOM THERE")
+			beep(.Invalid)
 		case .Completed:
+			completed = true
 			name := game.MOLECULE_DEFS[e.id].name
 			if e.id == .None { name = "MOLECULE" }
 			set_message(GOOD, "%s +%d", name, e.score)
+			beep(e.id == .None ? .Molecule : .Recognised)
+		case .Game_Over, .Supply_Empty:
+			over = true
 		}
+	}
+	if placed && !completed {
+		beep(.Place)
+	}
+	if over {
+		beep(.Game_Over)
 	}
 }
 
@@ -113,6 +140,7 @@ do_place :: proc(row, col: int) {
 do_rotate :: proc(turns: int) {
 	if screen == .Play && play.phase == .Playing {
 		game.step(&play, game.Rotate{turns})
+		take_events()
 	}
 }
 
@@ -132,6 +160,7 @@ on_key :: proc(e: js.Event) {
 	case .Title:
 		switch code {
 		case "Enter", "Space": start_endless()
+		case "KeyM": muted = !muted
 		case: handled = false
 		}
 	case .Play:
@@ -147,6 +176,7 @@ on_key :: proc(e: js.Event) {
 		case "KeyR", "KeyE", "Space", "ArrowUp", "ArrowRight": do_rotate(1)
 		case "KeyQ", "ArrowLeft", "ArrowDown": do_rotate(-1)
 		case "Escape": screen = .Title
+		case "KeyM": muted = !muted
 		case:
 			if len(code) == 6 && code[:5] == "Digit" && code[5] >= '1' && code[5] <= '8' {
 				do_select(int(code[5] - '1'))
@@ -192,6 +222,8 @@ pointer_down :: proc "c" (x, y: f32, precise: i32) {
 			do_rotate(1)
 		} else if in_rect(menu_button, x, y) {
 			screen = .Title
+		} else if in_rect(sound_button, x, y) {
+			muted = !muted
 		} else if row, col, ok := cell_at(x, y); ok {
 			if precise != 0 || (hover_set && hover_row == row && hover_col == col) {
 				do_place(row, col)
@@ -325,11 +357,12 @@ draw_panel :: proc() {
 
 	draw_button(rotate_button, "ROTATE (R)", play.phase == .Playing)
 	draw_button(menu_button, "MENU (ESC)")
+	draw_button(sound_button, muted ? "SOUND OFF (M)" : "SOUND ON (M)")
 	if msg != "" {
-		draw_text(x, 256, msg, msg_color, 1)
+		draw_text(x, 264, msg, msg_color, 1)
 	}
 	turns: [24]u8
-	draw_text(x, 276, fmt.bprintf(turns[:], "TURN %d", play.turns), DIM, 1)
+	draw_text(x, 280, fmt.bprintf(turns[:], "TURN %d", play.turns), DIM, 1)
 }
 
 draw_play :: proc() {

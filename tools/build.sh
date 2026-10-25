@@ -10,4 +10,6 @@ cp "$(odin root)/core/sys/wasm/js/odin.js" build/web/
 cp web/index.html build/web/
 cp assets/font/dbyte_1x.png build/web/font.png
 python3 tools/gen_atlas.py assets/art/world.json build/web/art.png
+mkdir -p build/web/sfx
+cp assets/sfx/*.wav build/web/sfx/
 echo "built build/web ($opt)"

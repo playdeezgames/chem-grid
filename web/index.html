@@ -53,6 +53,21 @@
     }
   };
 
+  // Order must match `Sound` in src/game/art.odin.
+  const SOUND_FILES = ["place", "rotate", "invalid", "molecule", "recognised", "game_over", "win"]
+    .map((n) => "sfx/" + n + ".wav");
+  const sounds = [];
+  let audio = null;
+  const unlock = () => {
+    if (audio) return;
+    try {
+      audio = new (window.AudioContext || window.webkitAudioContext)();
+      SOUND_FILES.forEach((f, i) => fetch(f).then((r) => r.arrayBuffer())
+        .then((b) => audio.decodeAudioData(b)).then((buf) => { sounds[i] = buf; }).catch(() => {}));
+    } catch (e) { audio = null; }
+  };
+  for (const ev of ["keydown", "pointerdown"]) window.addEventListener(ev, unlock);
+
   const memory = new odin.WasmMemoryInterface();
   odin.runWasm("game.wasm", null, {
     canvas: {
@@ -67,6 +82,16 @@
         ctx.globalAlpha = alpha;
         ctx.drawImage(atlas, sprite * T, 0, T, T, x, y, T, T);
         ctx.globalAlpha = 1;
+      },
+      play_sound: (id) => {
+        if (!audio || !sounds[id]) return;
+        if (audio.state === "suspended") audio.resume();
+        const src = audio.createBufferSource();
+        const gain = audio.createGain();
+        gain.gain.value = 0.3;
+        src.buffer = sounds[id];
+        src.connect(gain).connect(audio.destination);
+        src.start();
       },
       draw_text: (x, y, ptr, len, rgb, scale) => {
         drawText(x, y, memory.loadString(ptr, len), rgb, scale);

@@ -39,3 +39,14 @@ bond_sprite :: proc(s: Side) -> Sprite {
 	}
 	return .Bond_North
 }
+
+// One entry per exported sound, in the same order as SOUND_FILES in web/index.html (assets/sfx/*.wav, made in Anvil).
+Sound :: enum u8 {
+	Place,
+	Rotate,
+	Invalid,
+	Molecule,   // a molecule closed and vanished
+	Recognised, // ... and it was a known one (bigger sound)
+	Game_Over,
+	Win,        // a level objective met (used once levels exist)
+}
