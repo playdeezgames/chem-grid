@@ -93,6 +93,19 @@
         src.connect(gain).connect(audio.destination);
         src.start();
       },
+      storage_get: (kp, kl, bp, cap) => {
+        try {
+          const v = localStorage.getItem(memory.loadString(kp, kl));
+          if (v === null) return -1;
+          const bytes = new TextEncoder().encode(v);
+          if (bytes.length > cap) return -2;
+          new Uint8Array(memory.memory.buffer, bp, bytes.length).set(bytes);
+          return bytes.length;
+        } catch (e) { return -1; }
+      },
+      storage_set: (kp, kl, vp, vl) => {
+        try { localStorage.setItem(memory.loadString(kp, kl), memory.loadString(vp, vl)); } catch (e) {}
+      },
       draw_text: (x, y, ptr, len, rgb, scale) => {
         drawText(x, y, memory.loadString(ptr, len), rgb, scale);
       },

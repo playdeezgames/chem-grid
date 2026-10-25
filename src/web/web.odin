@@ -19,6 +19,10 @@ foreign canvas {
 	draw_text :: proc(x, y: f32, text: string, rgb: u32, scale: i32) ---
 	// Play sound number `sound` (game.Sound). The page unlocks audio on the first key or pointer press.
 	play_sound :: proc(sound: i32) ---
+	// localStorage. storage_get copies the value into buf and returns its byte length, or -1 when
+	// there is none (or storage is unavailable) and -2 when it does not fit.
+	storage_get :: proc(key: string, buf: [^]u8, cap: i32) -> i32 ---
+	storage_set :: proc(key: string, value: string) ---
 }
 
 INK :: 0x2b2d42
@@ -54,9 +58,38 @@ msg: string
 msg_color: u32
 msg_time: f32
 muted: bool
+save: game.Save
+new_best: bool // the run that just ended set a record
+
+SAVE_KEY :: "chem-grid-save"
 
 main :: proc() {
 	js.add_window_event_listener(.Key_Down, nil, on_key)
+	load_save()
+}
+
+// A save that fails to read or validate is ignored whole: defaults stay.
+load_save :: proc() {
+	buf: [game.SAVE_MAX_LEN]u8
+	n := storage_get(SAVE_KEY, raw_data(buf[:]), i32(len(buf)))
+	if n < 0 {
+		return
+	}
+	if loaded, ok := game.save_decode(string(buf[:n])); ok {
+		save = loaded
+		muted = loaded.muted
+	}
+}
+
+store_save :: proc() {
+	save.muted = muted
+	buf: [game.SAVE_MAX_LEN]u8
+	storage_set(SAVE_KEY, game.save_encode(&save, buf[:]))
+}
+
+toggle_mute :: proc() {
+	muted = !muted
+	store_save()
 }
 
 new_seed :: proc() -> u64 {
@@ -66,6 +99,7 @@ new_seed :: proc() -> u64 {
 begin :: proc() {
 	screen = .Play
 	hover_set = false
+	new_best = false
 	msg = ""
 }
 
@@ -174,8 +208,14 @@ take_events :: proc() {
 			beep(e.id == .None ? .Molecule : .Recognised)
 		case .Game_Over, .Supply_Empty:
 			over = true
+			if !play.has_goals {
+				new_best = game.record_endless(&save, play.score)
+				store_save()
+			}
 		case .Won:
 			beep(.Win)
+			new_best = game.record_level(&save, play.level, play.score)
+			store_save()
 		}
 	}
 	if placed && !completed {
@@ -215,13 +255,13 @@ on_key :: proc(e: js.Event) {
 		switch code {
 		case "Enter", "Space": start_endless()
 		case "KeyL": screen = .Select
-		case "KeyM": muted = !muted
+		case "KeyM": toggle_mute()
 		case: handled = false
 		}
 	case .Select:
 		switch code {
 		case "Escape": screen = .Title
-		case "KeyM": muted = !muted
+		case "KeyM": toggle_mute()
 		case:
 			if len(code) == 6 && code[:5] == "Digit" && code[5] >= '1' && code[5] <= '9' {
 				start_level(int(code[5] - '1'))
@@ -234,6 +274,7 @@ on_key :: proc(e: js.Event) {
 			switch code {
 			case "Enter", "Space": overlay_primary()
 			case "Escape": leave()
+			case "KeyM": toggle_mute()
 			case: handled = false
 			}
 			break
@@ -242,7 +283,7 @@ on_key :: proc(e: js.Event) {
 		case "KeyR", "KeyE", "Space", "ArrowUp", "ArrowRight": do_rotate(1)
 		case "KeyQ", "ArrowLeft", "ArrowDown": do_rotate(-1)
 		case "Escape": leave()
-		case "KeyM": muted = !muted
+		case "KeyM": toggle_mute()
 		case:
 			if len(code) == 6 && code[:5] == "Digit" && code[5] >= '1' && code[5] <= '8' {
 				do_select(int(code[5] - '1'))
@@ -305,7 +346,7 @@ pointer_down :: proc "c" (x, y: f32, precise: i32) {
 		} else if in_rect(menu_button, x, y) {
 			leave()
 		} else if in_rect(sound_button, x, y) {
-			muted = !muted
+			toggle_mute()
 		} else if row, col, ok := cell_at(x, y); ok {
 			if precise != 0 || (hover_set && hover_row == row && hover_col == col) {
 				do_place(row, col)
@@ -400,6 +441,9 @@ draw_title :: proc() {
 	draw_centered(200, 104, "Close a molecule and it scores.", DIM, 1)
 	draw_button(endless_button, "ENDLESS")
 	draw_button(levels_button, "LEVELS (L)")
+	if save.endless_best > 0 {
+		draw_centered(200, 204, fmt.tprintf("Best endless score: %d", save.endless_best), DIM, 1)
+	}
 	draw_centered(200, 222, "Mouse: click to place, R or wheel to rotate", DIM, 1)
 	draw_centered(200, 234, "Touch: tap a cell, tap it again to place", DIM, 1)
 	draw_centered(200, 284, "Font DINOBYTE by mby, CC BY 4.0", DIM, 1)
@@ -408,7 +452,13 @@ draw_title :: proc() {
 draw_select :: proc() {
 	draw_centered(200, 16, "LEVELS", INK, 2)
 	for l, i in game.LEVELS {
-		draw_button(level_button(i), fmt.tprintf("%d %s", i + 1, l.name))
+		r := level_button(i)
+		draw_button(r, "")
+		draw_text(r.x + 6, r.y + 6, fmt.tprintf("%d %s", i + 1, l.name), INK, 1)
+		if save.cleared[i] {
+			best := fmt.tprintf("%d", save.best[i])
+			draw_text(r.x + r.w - 6 - text_w(best, 1), r.y + 6, best, GOOD, 1)
+		}
 	}
 	draw_button(back_button, "BACK (ESC)")
 }
@@ -497,7 +547,7 @@ draw_board :: proc() {
 
 draw_panel :: proc() {
 	x := f32(PANEL_X)
-	draw_text(x, 10, play.has_goals ? game.LEVELS[play.level].name : "ENDLESS", DIM, 1)
+	draw_text(x, 10, play.has_goals ? game.LEVELS[play.level].name : fmt.tprintf("ENDLESS BEST %d", save.endless_best), DIM, 1)
 	draw_text(x, 26, "SCORE", DIM, 1)
 	buf: [16]u8
 	draw_text(x, 38, fmt.bprintf(buf[:], "%d", play.score), INK, 2)
@@ -578,6 +628,9 @@ draw_play :: proc() {
 		draw_centered(cx, 70, title, color, 2)
 		draw_centered(cx, 100, fmt.tprintf("SCORE %d", play.score), INK, 2)
 		draw_centered(cx, 132, note, DIM, 1)
+		if new_best {
+			draw_centered(cx, 148, "NEW BEST!", GOOD, 1)
+		}
 		primary := "PLAY AGAIN"
 		if play.has_goals {
 			primary = play.phase == .Won && has_next_level() ? "NEXT LEVEL" : "RETRY"
