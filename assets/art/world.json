@@ -494,11 +494,12 @@
   "sounds": [
     {"name": "place", "text": "T120 O4 L32 C", "loop": false},
     {"name": "invalid", "text": "T220 O2 L16 EC", "loop": false},
-    {"name": "molecule", "text": "T220 O5 L16 CEG", "loop": false},
-    {"name": "recognised", "text": "T200 O5 L16 CEGCEG>C L8 E", "loop": false},
+    {"name": "molecule", "text": "T220 O5 L16 CEG L8 >C", "loop": false},
+    {"name": "recognised", "text": "T200 O5 L16 CEGCEG L4 >C", "loop": false},
     {"name": "rotate", "text": "T160 O5 L32 GB", "loop": false},
     {"name": "game_over", "text": "T110 O4 L8 GEC<G L4 C", "loop": false},
-    {"name": "win", "text": "T180 O4 L16 CEGC>EG L4 >C", "loop": false}
+    {"name": "win", "text": "T180 O4 L16 CEGC>EG L4 >C", "loop": false},
+    {"name": "molecule_big", "text": "T180 O5 L16 CEGCEGCEG L2 >C", "loop": false}
   ],
   "feature_types": [],
   "features": [],

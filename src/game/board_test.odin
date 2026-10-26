@@ -155,10 +155,20 @@ full_board_has_no_placement :: proc(t: ^testing.T) {
 sprite_enum_matches_the_art_world :: proc(t: ^testing.T) {
 	// The atlas packs the world's sprites in order; the enum must have as many.
 	testing.expect_value(t, len(Sprite), 12)
-	testing.expect_value(t, len(Sound), 7)
+	testing.expect_value(t, len(Sound), 8)
 	testing.expect_value(t, ball_sprite(.O_Bent), Sprite.Ball_O)
 	testing.expect_value(t, ball_sprite(.O_Straight), Sprite.Ball_O)
 	for s in Side {
 		testing.expect_value(t, int(bond_sprite(s)) - int(Sprite.Bond_North), int(s))
 	}
+}
+
+@(test)
+bigger_molecules_get_longer_sounds :: proc(t: ^testing.T) {
+	testing.expect_value(t, completion_sound(.None, 3), Sound.Molecule)
+	testing.expect_value(t, completion_sound(.H2O, 3), Sound.Recognised)
+	testing.expect_value(t, completion_sound(.None, BIG_MOLECULE_ATOMS - 1), Sound.Molecule)
+	testing.expect_value(t, completion_sound(.None, BIG_MOLECULE_ATOMS), Sound.Molecule_Big)
+	testing.expect_value(t, completion_sound(.C2H6, 8), Sound.Molecule_Big)
+	testing.expect_value(t, completion_sound(.C4H8, 12), Sound.Molecule_Big)
 }

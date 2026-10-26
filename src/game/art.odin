@@ -48,5 +48,17 @@ Sound :: enum u8 {
 	Molecule,   // a molecule closed and vanished
 	Recognised, // ... and it was a known one (bigger sound)
 	Game_Over,
-	Win,        // a level objective met (used once levels exist)
+	Win,        // a level objective met, or an endless tray slot gained
+	Molecule_Big, // a big molecule vanished: a longer fanfare
+}
+
+// Molecules this size or bigger get the long fanfare, recognised or not.
+BIG_MOLECULE_ATOMS :: 7
+
+// Which sound a completed molecule makes: longer for bigger ones, and a recognised one sounds richer than a plain one.
+completion_sound :: proc(id: Molecule_Id, atoms: int) -> Sound {
+	if atoms >= BIG_MOLECULE_ATOMS {
+		return .Molecule_Big
+	}
+	return id == .None ? .Molecule : .Recognised
 }

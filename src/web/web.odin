@@ -205,7 +205,7 @@ take_events :: proc() {
 			name := game.MOLECULE_DEFS[e.id].name
 			if e.id == .None { name = "MOLECULE" }
 			set_message(GOOD, "%s +%d", name, e.score)
-			beep(e.id == .None ? .Molecule : .Recognised)
+			beep(game.completion_sound(e.id, e.atoms))
 		case .Game_Over, .Supply_Empty:
 			over = true
 			if !play.has_goals {
