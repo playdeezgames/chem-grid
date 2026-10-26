@@ -56,7 +56,7 @@ rotation_wraps_and_resets_with_each_new_atom :: proc(t: ^testing.T) {
 
 @(test)
 tray_selection :: proc(t: ^testing.T) {
-	g := game_start(supply_bag({.H, .N, .He}, false, .Tray, 3, 1))
+	g := game_start(supply_bag({.H, .N, .C}, false, .Tray, 3, 1))
 	step(&g, Select{1})
 	hand, _ := in_hand(&g)
 	testing.expect_value(t, hand, Kind.N)
@@ -66,7 +66,7 @@ tray_selection :: proc(t: ^testing.T) {
 	step(&g, Select{9}) // no such slot
 	testing.expect_value(t, g.selected, 2)
 	// A queue ignores selecting anything but the front.
-	q := game_start(supply_bag({.H, .N, .He}, false, .Queue, 3, 1))
+	q := game_start(supply_bag({.H, .N, .C}, false, .Queue, 3, 1))
 	step(&q, Select{1})
 	testing.expect_value(t, q.selected, 0)
 }
@@ -235,7 +235,7 @@ queue_front_stuck_ends_the_game_even_if_later_atoms_fit :: proc(t: ^testing.T) {
 
 @(test)
 endless_tray_size_follows_the_score :: proc(t: ^testing.T) {
-	cases := [?][2]int{{0, 1}, {999, 1}, {1000, 2}, {1999, 2}, {2000, 3}, {4999, 3}, {5000, 4}, {9999, 4}, {10000, 5}, {19999, 5}, {20000, 6}, {1_000_000, 6}}
+	cases := [?][2]int{{0, 1}, {9999, 1}, {10000, 2}, {19999, 2}, {20000, 3}, {49999, 3}, {50000, 4}, {99999, 4}, {100000, 5}, {199999, 5}, {200000, 6}, {1_000_000, 6}}
 	for c in cases {
 		testing.expect_value(t, endless_tray_size(c[0]), c[1])
 	}
@@ -252,7 +252,7 @@ endless_starts_with_a_one_slot_tray :: proc(t: ^testing.T) {
 @(test)
 endless_tray_gains_a_slot_when_the_score_passes_a_threshold :: proc(t: ^testing.T) {
 	g := game_endless(5)
-	g.score = 1000 // as if a molecule had just scored; the next placement notices
+	g.score = 10000 // as if a molecule had just scored; the next placement notices
 	out: Placements
 	kind, _ := in_hand(&g)
 	valid_placements(&g.board, kind, &out)
@@ -281,4 +281,38 @@ level_tray_size_stays_what_the_level_says :: proc(t: ^testing.T) {
 	g := game_level(4, 1) // Ammonia: a tray of 4
 	testing.expect_value(t, g.supply.view, View.Tray)
 	testing.expect_value(t, g.supply.size, 4)
+}
+
+@(test)
+helium_in_the_tray_must_be_played_first :: proc(t: ^testing.T) {
+	g := game_endless(5)
+	supply_set_size(&g.supply, 3)
+	g.supply.slots[0] = .C
+	g.supply.slots[1] = .He
+	g.supply.slots[2] = .H
+	update_phase(&g)
+	testing.expect(t, he_in_tray(&g))
+	testing.expect_value(t, g.selected, 1) // the He is put in hand
+	step(&g, Select{0})
+	testing.expect_value(t, g.selected, 1) // other atoms cannot be taken
+	testing.expect(t, !can_take(&g, 2))
+	testing.expect(t, can_take(&g, 1))
+	g.supply.slots[1] = .N
+	update_phase(&g)
+	testing.expect(t, !he_in_tray(&g))
+	step(&g, Select{0})
+	testing.expect_value(t, g.selected, 0)
+}
+
+@(test)
+helium_drifts_up_and_escapes :: proc(t: ^testing.T) {
+	b: Board
+	b.cells[0][1] = {occupied = true, kind = .He}
+	b.cells[1][1] = {occupied = true, kind = .He}
+	b.cells[3][4] = {occupied = true, kind = .He}
+	b.cells[2][4] = {occupied = true, kind = .C, bonds = {.North, .East, .South, .West}}
+	testing.expect_value(t, drift_helium(&b), 1)
+	testing.expect(t, b.cells[0][1].occupied && b.cells[0][1].kind == .He)
+	testing.expect(t, !b.cells[1][1].occupied)
+	testing.expect(t, b.cells[3][4].occupied) // blocked, stays
 }

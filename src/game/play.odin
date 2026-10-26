@@ -35,6 +35,7 @@ Event_Kind :: enum u8 {
 	Supply_Empty,
 	Won,
 	Tray_Grew, // endless mode: a new tray slot opened
+	He_Drifted, // endless mode: a molecule closed and the helium rose a square; atoms = how many left the board
 	He_Added,  // endless mode: the helium countdown ran out and a He is coming
 }
 
@@ -79,7 +80,7 @@ ENDLESS_WEIGHTS := [Kind]int {
 	.C          = 1,
 	.He         = 0,
 }
-TRAY_GROWTH_SCORES :: [5]int{1000, 2000, 5000, 10000, 20000}
+TRAY_GROWTH_SCORES :: [5]int{10000, 20000, 50000, 100000, 200000}
 
 // Placements between helium: 10 with a one-slot tray, one fewer for each slot gained, never below 5.
 he_interval :: proc(tray_size: int) -> int {
@@ -160,6 +161,45 @@ in_hand :: proc(g: ^Game) -> (Kind, bool) {
 	return vis[g.selected], true
 }
 
+// Endless mode: when a molecule closes, every helium rises one square (if the square above is free) and
+// those on the top row escape. Top-down, so a stack of helium rises together. Returns how many escaped.
+drift_helium :: proc(board: ^Board) -> int {
+	escaped := 0
+	for row in 0 ..< BOARD_SIZE {
+		for col in 0 ..< BOARD_SIZE {
+			c := board.cells[row][col]
+			if !c.occupied || c.kind != .He { continue }
+			if row == 0 {
+				board.cells[row][col] = {}
+				escaped += 1
+			} else if !board.cells[row - 1][col].occupied {
+				board.cells[row - 1][col] = c
+				board.cells[row][col] = {}
+			}
+		}
+	}
+	return escaped
+}
+
+// Helium must be dealt with first: while the tray holds one, only helium can be taken.
+he_in_tray :: proc(g: ^Game) -> bool {
+	if g.supply.view != .Tray {
+		return false
+	}
+	for k in supply_visible(&g.supply) {
+		if k == .He { return true }
+	}
+	return false
+}
+
+// Can the player take this slot right now (the supply allows it, and helium goes first)?
+can_take :: proc(g: ^Game, slot: int) -> bool {
+	if !supply_can_take(&g.supply, slot) {
+		return false
+	}
+	return !he_in_tray(g) || supply_visible(&g.supply)[slot] == .He
+}
+
 emit :: proc(g: ^Game, e: Event) {
 	if g.event_count < MAX_EVENTS {
 		g.events[g.event_count] = e
@@ -184,9 +224,19 @@ update_phase :: proc(g: ^Game) {
 	if g.selected >= g.supply.filled {
 		g.selected = 0
 	}
-	// Only atoms the player can take count: the whole tray, but just the front of a queue.
+	// A helium in the tray is the only thing in hand until it is placed.
+	if !can_take(g, g.selected) {
+		for slot in 0 ..< g.supply.filled {
+			if can_take(g, slot) {
+				g.selected = slot
+				g.rot = 0
+				break
+			}
+		}
+	}
+	// Only atoms the player can take count: the whole tray (just helium while there is one), the front of a queue.
 	for k, slot in supply_visible(&g.supply) {
-		if supply_can_take(&g.supply, slot) && has_placement(&g.board, k) {
+		if can_take(g, slot) && has_placement(&g.board, k) {
 			return
 		}
 	}
@@ -201,7 +251,7 @@ step :: proc(g: ^Game, cmd: Command) {
 	}
 	switch c in cmd {
 	case Select:
-		if supply_can_take(&g.supply, c.slot) {
+		if can_take(g, c.slot) {
 			g.selected = c.slot
 			g.rot = 0
 			emit(g, {kind = .Selected})
@@ -235,6 +285,8 @@ step :: proc(g: ^Game, cmd: Command) {
 			// placement is about to refill.
 			if m.count > 0 {
 				g.moves_to_he = he_interval(g.supply.size)
+				escaped := drift_helium(&g.board)
+				emit(g, {kind = .He_Drifted, atoms = escaped})
 			} else {
 				g.moves_to_he -= 1
 				if g.moves_to_he <= 0 {

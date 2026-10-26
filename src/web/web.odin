@@ -212,6 +212,10 @@ take_events :: proc() {
 				new_best = game.record_endless(&save, play.score)
 				store_save()
 			}
+		case .He_Drifted:
+			if e.atoms > 0 {
+				set_message(GOOD, "HELIUM ESCAPED")
+			}
 		case .He_Added:
 			set_message(ACCENT, "HELIUM NEXT")
 			beep(.Invalid)
@@ -564,7 +568,7 @@ draw_panel :: proc() {
 		blit(i32(game.Sprite.Cell_A), r.x, r.y, 1)
 		selected := i == play.selected
 		bonds := game.bonds_of(kind, selected ? play.rot : 0)
-		faded := play.supply.view == .Queue && i > 0
+		faded := (play.supply.view == .Queue && i > 0) || !game.can_take(&play, i)
 		draw_atom(kind, bonds, r.x, r.y, faded ? 0.5 : 1)
 		if selected {
 			blit(i32(game.Sprite.Frame), r.x, r.y, 1)
