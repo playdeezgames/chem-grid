@@ -35,6 +35,7 @@ Event_Kind :: enum u8 {
 	Supply_Empty,
 	Won,
 	Tray_Grew, // endless mode: a new tray slot opened
+	He_Added,  // endless mode: the helium countdown ran out and a He is coming
 }
 
 Event :: struct {
@@ -59,25 +60,31 @@ Game :: struct {
 	rot:            int,         // its rotation
 	events:         [MAX_EVENTS]Event,
 	event_count:    int,
-	endless:        bool,        // helium weight rises as the game goes on
-	he_base_weight: int,
+	endless:        bool,        // helium arrives on a countdown (see moves_to_he)
+	moves_to_he:    int,         // endless: placements left before a He is the next piece
 	has_goals:      bool,        // a level: the game is won when goals are met
 	goals:          Goals,
 	level:          int,         // index into LEVELS, when has_goals
 }
 
 // Endless mode: a tray that starts with one slot and gains one at each of these scores (six at most),
-// filled from a random supply whose helium weight climbs by one every HE_EVERY turns, so every game ends.
+// filled from a random supply with no helium in it. Helium comes from a countdown instead: every
+// he_interval(tray size) placements a He becomes the next piece, and completing a molecule restarts the
+// countdown without one. So the board fills with helium unless the player keeps closing molecules.
 ENDLESS_WEIGHTS := [Kind]int {
 	.H          = 6,
 	.O_Straight = 2,
 	.O_Bent     = 2,
 	.N          = 2,
 	.C          = 1,
-	.He         = 1,
+	.He         = 0,
 }
 TRAY_GROWTH_SCORES :: [5]int{1000, 2000, 5000, 10000, 20000}
-HE_EVERY :: 10
+
+// Placements between helium: 10 with a one-slot tray, one fewer for each slot gained, never below 5.
+he_interval :: proc(tray_size: int) -> int {
+	return max(11 - tray_size, 5)
+}
 
 // Tray slots an endless game has at this score.
 endless_tray_size :: proc(score: int) -> int {
@@ -99,7 +106,7 @@ game_start :: proc(supply: Supply) -> Game {
 game_endless :: proc(seed: u64) -> Game {
 	g := game_start(supply_weighted(ENDLESS_WEIGHTS, .Tray, endless_tray_size(0), seed))
 	g.endless = true
-	g.he_base_weight = ENDLESS_WEIGHTS[.He]
+	g.moves_to_he = he_interval(g.supply.size)
 	return g
 }
 
@@ -212,7 +219,6 @@ step :: proc(g: ^Game, cmd: Command) {
 			emit(g, {kind = .Invalid})
 			return
 		}
-		supply_take(&g.supply, g.selected)
 		place(&g.board, c.row, c.col, kind, g.rot)
 		g.turns += 1
 		emit(g, {kind = .Placed})
@@ -224,6 +230,21 @@ step :: proc(g: ^Game, cmd: Command) {
 			g.atoms_cleared += m.count
 			emit(g, {kind = .Completed, id = s.id, atoms = m.count, score = total(s), bonus = s.bonus})
 		}
+		if g.endless {
+			// Closing a molecule buys time; otherwise count down, and at zero a He takes the slot this
+			// placement is about to refill.
+			if m.count > 0 {
+				g.moves_to_he = he_interval(g.supply.size)
+			} else {
+				g.moves_to_he -= 1
+				if g.moves_to_he <= 0 {
+					supply_inject(&g.supply, .He)
+					g.moves_to_he = he_interval(g.supply.size)
+					emit(g, {kind = .He_Added})
+				}
+			}
+		}
+		supply_take(&g.supply, g.selected)
 		g.selected = 0
 		g.rot = 0
 		if g.has_goals && goals_met(g) {
@@ -232,7 +253,6 @@ step :: proc(g: ^Game, cmd: Command) {
 			return
 		}
 		if g.endless {
-			g.supply.weights[.He] = g.he_base_weight + g.turns / HE_EVERY
 			if size := endless_tray_size(g.score); size > g.supply.size {
 				supply_set_size(&g.supply, size)
 				emit(g, {kind = .Tray_Grew})

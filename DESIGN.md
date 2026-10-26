@@ -29,7 +29,7 @@ Status: draft, rules as stated by the user on October 25, 2026. Open questions a
 
 - **Helium** is just another weighted atom: a weight in the queue, a listed entry in a bag or tray. A level may have none.
 - **Levels** give a fixed bag (plus a supply mode) and objectives: a score, N of a named molecule, or similar. Win when met; lose on game over.
-- **Endless mode** is a tray filled from the random supply. It starts with 1 slot and gains a slot at 1000, 2000, 5000, 10000 and 20000 points (6 at most); levels set their own tray or queue size. The helium weight escalates over time so every game ends. High score saved in the browser (localStorage).
+- **Endless mode** is a tray filled from the random supply. It starts with 1 slot and gains a slot at 1000, 2000, 5000, 10000 and 20000 points (6 at most); levels set their own tray or queue size. Helium is not random in endless mode: a countdown starts at 10 placements (one fewer for each tray slot gained, never below 5) and when it reaches zero a He becomes the next piece, filling the slot that was just used. Completing a molecule restarts the countdown with no He, so the board fills with helium unless the player keeps closing molecules, and every game ends. High score saved in the browser (localStorage).
 
 ## Scoring (approved October 25, 2026; numbers to be tuned in play)
 

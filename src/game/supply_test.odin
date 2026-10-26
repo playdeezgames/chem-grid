@@ -148,3 +148,15 @@ weights_can_be_changed_during_play :: proc(t: ^testing.T) {
 		testing.expect_value(t, k, Kind.H)
 	}
 }
+
+@(test)
+injected_atoms_come_out_next :: proc(t: ^testing.T) {
+	s := supply_weighted(only(.H), .Tray, 3, 4)
+	supply_inject(&s, .He, 2)
+	_, _ = supply_take(&s, 1) // refills slot 1 with the first injected atom
+	testing.expect_value(t, supply_visible(&s)[1], Kind.He)
+	_, _ = supply_take(&s, 0) // and slot 0 with the second
+	testing.expect_value(t, supply_visible(&s)[0], Kind.He)
+	_, _ = supply_take(&s, 2) // then back to the source
+	testing.expect_value(t, supply_visible(&s)[2], Kind.H)
+}

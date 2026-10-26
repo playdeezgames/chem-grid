@@ -32,6 +32,8 @@ Supply :: struct {
 	bag_next:  int,            // next bag entry not yet shown
 	slots:     [MAX_SLOTS]Kind,
 	filled:    int,            // slots in use; fewer than size once a bag runs dry
+	inject_kind:  Kind,        // atoms forced to come out next, ahead of the source (see supply_inject)
+	inject_count: int,
 }
 
 next_random :: proc(s: ^Supply) -> u64 {
@@ -81,6 +83,10 @@ supply_bag :: proc(kinds: []Kind, shuffle: bool, view: View, size: int, seed: u6
 
 // Pull one atom from the source. false when a bag has run dry or every weight is zero.
 draw :: proc(s: ^Supply) -> (Kind, bool) {
+	if s.inject_count > 0 {
+		s.inject_count -= 1
+		return s.inject_kind, true
+	}
 	switch s.source {
 	case .Bag:
 		if s.bag_next >= s.bag_count {
@@ -124,6 +130,13 @@ refill :: proc(s: ^Supply) {
 supply_set_size :: proc(s: ^Supply, size: int) {
 	s.size = clamp(size, 1, MAX_SLOTS)
 	refill(s)
+}
+
+// Make the next `count` atoms drawn be `kind`, whatever the source would have given. They take the next
+// slots that refill, so nothing already on offer is replaced. (Endless mode uses this for helium.)
+supply_inject :: proc(s: ^Supply, kind: Kind, count := 1) {
+	s.inject_kind = kind
+	s.inject_count += count
 }
 
 supply_visible :: proc(s: ^Supply) -> []Kind {

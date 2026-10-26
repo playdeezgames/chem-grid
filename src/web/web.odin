@@ -212,6 +212,9 @@ take_events :: proc() {
 				new_best = game.record_endless(&save, play.score)
 				store_save()
 			}
+		case .He_Added:
+			set_message(ACCENT, "HELIUM NEXT")
+			beep(.Invalid)
 		case .Tray_Grew:
 			set_message(GOOD, "NEW TRAY SLOT")
 			beep(.Win)
@@ -570,6 +573,10 @@ draw_panel :: proc() {
 
 	if play.has_goals {
 		draw_goals(x, 146)
+	} else if play.phase == .Playing {
+		// Endless: how many placements until a helium becomes the next piece (red when close).
+		soon := play.moves_to_he <= 2
+		draw_text(x, 148, fmt.tprintf("HELIUM IN %d", play.moves_to_he), soon ? ACCENT : INK, 1)
 	}
 	draw_button(rotate_button, "ROTATE (R)", play.phase == .Playing)
 	draw_button(menu_button, play.has_goals ? "LEVELS (ESC)" : "MENU (ESC)")

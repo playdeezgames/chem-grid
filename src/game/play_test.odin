@@ -110,21 +110,85 @@ tray_with_one_placeable_atom_is_not_over :: proc(t: ^testing.T) {
 }
 
 @(test)
-endless_helium_weight_climbs :: proc(t: ^testing.T) {
-	g := game_endless(77)
-	testing.expect_value(t, g.supply.weights[.He], 1)
-	for _ in 0 ..< 25 {
-		out: Placements
-		kind, _ := in_hand(&g)
-		valid_placements(&g.board, kind, &out)
-		if out.count == 0 { break }
-		p := out.items[0]
-		g.rot = int(p.rot)
-		step(&g, Place{int(p.row), int(p.col)})
-		if g.phase != .Playing { break }
+helium_interval_shrinks_with_the_tray :: proc(t: ^testing.T) {
+	expected := [?]int{10, 9, 8, 7, 6, 5}
+	for want, i in expected {
+		testing.expect_value(t, he_interval(i + 1), want)
 	}
-	testing.expect_value(t, g.supply.weights[.He], 1 + g.turns / HE_EVERY)
-	testing.expect(t, g.turns >= 10)
+	testing.expect_value(t, he_interval(20), 5) // never below 5
+}
+
+@(test)
+endless_random_supply_has_no_helium :: proc(t: ^testing.T) {
+	g := game_endless(3)
+	for _ in 0 ..< 5000 {
+		k, ok := draw(&g.supply)
+		testing.expect(t, ok)
+		if k == .He {
+			testing.expect(t, false)
+			return
+		}
+	}
+}
+
+// Place the hand on the first legal spot, or (far) the last, so two placements do not touch.
+place_somewhere :: proc(g: ^Game, far: bool) {
+	kind, _ := in_hand(g)
+	out: Placements
+	valid_placements(&g.board, kind, &out)
+	p := far ? out.items[out.count - 1] : out.items[0]
+	g.rot = int(p.rot)
+	step(g, Place{int(p.row), int(p.col)})
+}
+
+@(test)
+helium_becomes_the_next_piece_when_the_countdown_ends :: proc(t: ^testing.T) {
+	g := game_endless(11)
+	testing.expect_value(t, g.moves_to_he, 10)
+	g.moves_to_he = 2
+	place_somewhere(&g, false)
+	testing.expect_value(t, g.moves_to_he, 1)
+	testing.expect(t, !has_event(&g, .He_Added))
+	place_somewhere(&g, true)
+	testing.expect(t, has_event(&g, .He_Added))
+	hand, ok := in_hand(&g)
+	testing.expect(t, ok)
+	testing.expect_value(t, hand, Kind.He)
+	testing.expect_value(t, g.moves_to_he, he_interval(1)) // counting again
+}
+
+@(test)
+completing_a_molecule_restarts_the_countdown_without_helium :: proc(t: ^testing.T) {
+	g := game_endless(11)
+	g.moves_to_he = 2 // without the molecule, the second placement would bring the helium
+	g.supply.slots[0] = .H
+	g.rot = 1
+	step(&g, Place{4, 3})
+	testing.expect_value(t, g.moves_to_he, 1)
+	g.supply.slots[0] = .H
+	g.rot = 3
+	step(&g, Place{4, 4}) // H2 closes
+	testing.expect(t, has_event(&g, .Completed))
+	testing.expect(t, !has_event(&g, .He_Added))
+	testing.expect_value(t, g.moves_to_he, he_interval(1))
+	hand, _ := in_hand(&g)
+	testing.expect(t, hand != .He)
+}
+
+@(test)
+helium_fills_the_slot_that_was_just_used :: proc(t: ^testing.T) {
+	g := game_endless(11)
+	g.supply = supply_weighted(ENDLESS_WEIGHTS, .Tray, 3, 9)
+	g.moves_to_he = 1
+	step(&g, Select{1})
+	untouched0 := supply_visible(&g.supply)[0]
+	untouched2 := supply_visible(&g.supply)[2]
+	place_somewhere(&g, false)
+	vis := supply_visible(&g.supply)
+	testing.expect_value(t, len(vis), 3)
+	testing.expect_value(t, vis[1], Kind.He) // the slot that was used
+	testing.expect_value(t, vis[0], untouched0)
+	testing.expect_value(t, vis[2], untouched2)
 }
 
 @(test)
