@@ -20,7 +20,7 @@ Atoms go on an 8x8 board, and every bond has to meet a bond (or an empty square)
 - A finished molecule scores the weight of its atoms times its bonds, and recognised ones (water, ammonia, methane, ethanol, propane, a ring of cyclobutane and more) earn a bonus.
 - **Helium** has no bonds. It never completes and never leaves by itself, so it only takes up room. While one is in your tray it has to be placed before anything else.
 
-**Endless:** a tray that starts with one atom and opens a new slot at 10,000, 20,000, 50,000, 100,000 and 200,000 points (six at most). A helium arrives every few placements, faster as the tray grows. Closing a molecule resets that countdown and lifts every helium on the board one square, and those on the top row escape. Your best score is saved in your browser, and goes on the online top scores (TOP SCORES on the title screen) under a name you choose.
+**Endless:** a tray that starts with one atom and opens a new slot at 10,000, 20,000, 50,000, 100,000 and 200,000 points (six at most). A helium arrives every few placements, faster as the tray grows. Closing a molecule resets that countdown and sends every helium on the board floating up until it bumps into an atom; any with a clear path above it floats right off the board. Your best score is saved in your browser, and goes on the online top scores (TOP SCORES on the title screen) under a name you choose.
 
 **Levels:** twenty puzzles with their own supply of atoms and their own goals: build a named molecule, reach a score, use up the bag, or leave almost nothing behind. Your best score on each is saved.
 

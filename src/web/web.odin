@@ -139,6 +139,7 @@ begin :: proc() {
 	new_best = false
 	msg = ""
 	board.submit = .None
+	anim_on = false
 }
 
 open_scores :: proc(back: Screen) {
@@ -369,6 +370,83 @@ take_events :: proc() {
 do_place :: proc(row, col: int) {
 	game.step(&play, game.Place{row, col})
 	take_events()
+	start_anim()
+}
+
+// ---- the animation of the last placement: the closed molecule fades out while the helium rises ----
+// The board is already in its new state; this only changes how it is drawn for a moment. The next
+// placement starts a new animation, so input is never held up.
+
+FADE_TIME :: f32(0.35) // the closed molecule fades out
+RISE_START :: f32(0.15) // the helium starts rising while the molecule is still fading
+RISE_PER_CELL :: f32(0.07) // seconds per square risen
+
+anim_on: bool
+anim_t: f32
+anim_fade: game.Molecule
+anim_rises: game.He_Rises
+
+start_anim :: proc() {
+	anim_fade = play.cleared
+	anim_rises = play.rises
+	anim_t = 0
+	anim_on = anim_fade.count > 0 || anim_rises.count > 0
+}
+
+// Rows an animated helium travels: to row -1 (just above the board) when it escapes.
+rise_rows :: proc(r: game.He_Rise) -> f32 {
+	return f32(r.from_row - r.to_row)
+}
+
+anim_length :: proc() -> f32 {
+	length := anim_fade.count > 0 ? FADE_TIME : 0
+	for r in anim_rises.items[:anim_rises.count] {
+		length = max(length, RISE_START + rise_rows(r) * RISE_PER_CELL)
+	}
+	return length
+}
+
+advance_anim :: proc(dt: f32) {
+	if anim_on {
+		anim_t += dt
+		if anim_t >= anim_length() {
+			anim_on = false
+		}
+	}
+}
+
+// Where a rising helium is drawn now (in rows; -1 is one row above the board) and how opaque it is: it
+// slows as it arrives, and one leaving the board fades as it goes past the top edge.
+rise_at :: proc(r: game.He_Rise) -> (row, alpha: f32) {
+	p := clamp((anim_t - RISE_START) / (rise_rows(r) * RISE_PER_CELL), 0, 1)
+	eased := 1 - (1 - p) * (1 - p)
+	row = f32(r.from_row) - rise_rows(r) * eased
+	return row, clamp(1 + row, 0, 1)
+}
+
+// Whether a cell's atom is a helium still on its way there (drawn by draw_anim, not in its cell).
+arriving :: proc(row, col: int) -> bool {
+	if !anim_on { return false }
+	for r in anim_rises.items[:anim_rises.count] {
+		if r.to_row == row && r.col == col { return true }
+	}
+	return false
+}
+
+draw_anim :: proc() {
+	if !anim_on { return }
+	if fade := 1 - anim_t / FADE_TIME; fade > 0 {
+		for i in 0 ..< anim_fade.count {
+			p := anim_fade.cells[i]
+			draw_atom(anim_fade.kinds[i], anim_fade.sides[i], f32(BOARD_X + int(p.col) * game.TILE), f32(BOARD_Y + int(p.row) * game.TILE), fade)
+		}
+	}
+	for r in anim_rises.items[:anim_rises.count] {
+		row, alpha := rise_at(r)
+		if alpha > 0 {
+			draw_atom(.He, {}, f32(BOARD_X + r.col * game.TILE), BOARD_Y + row * game.TILE, alpha)
+		}
+	}
 }
 
 do_rotate :: proc(turns: int) {
@@ -563,6 +641,12 @@ qa_phase :: proc "c" () -> i32 {
 	return 1 + i32(play.phase)
 }
 
+// QA hook: -1 when no animation is playing, else 100 times the rising helium plus the fading atoms.
+@(export)
+qa_anim :: proc "c" () -> i32 {
+	return anim_on ? i32(anim_rises.count * 100 + anim_fade.count) : -1
+}
+
 // QA hook: start level `index`, or endless mode when index is negative.
 @(export)
 qa_start :: proc "c" (index: i32) {
@@ -623,6 +707,7 @@ rotate_input :: proc "c" (turns: i32) {
 @(export)
 step :: proc(dt: f64, c: runtime.Context) -> bool {
 	context = runtime.default_context()
+	advance_anim(f32(dt))
 	if msg_time > 0 {
 		msg_time -= f32(dt)
 		if msg_time <= 0 { msg = "" }
@@ -802,7 +887,7 @@ draw_board :: proc() {
 			y := f32(BOARD_Y + row * game.TILE)
 			blit(i32((row + col) % 2 == 0 ? game.Sprite.Cell_A : game.Sprite.Cell_B), x, y, 1)
 			c := play.board.cells[row][col]
-			if c.occupied {
+			if c.occupied && !arriving(row, col) {
 				draw_atom(c.kind, c.bonds, x, y, 1)
 			}
 		}
@@ -817,6 +902,7 @@ draw_board :: proc() {
 			}
 		}
 	}
+	draw_anim()
 	if have && hover_set && play.phase == .Playing {
 		x := f32(BOARD_X + hover_col * game.TILE)
 		y := f32(BOARD_Y + hover_row * game.TILE)

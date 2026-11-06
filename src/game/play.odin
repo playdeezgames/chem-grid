@@ -35,7 +35,7 @@ Event_Kind :: enum u8 {
 	Supply_Empty,
 	Won,
 	Tray_Grew, // endless mode: a new tray slot opened
-	He_Drifted, // endless mode: a molecule closed and the helium rose a square; atoms = how many left the board
+	He_Drifted, // endless mode: a molecule closed and the helium rose (see Game.rises); atoms = how many left the board
 	He_Added,  // endless mode: the helium countdown ran out and a He is coming
 }
 
@@ -66,6 +66,9 @@ Game :: struct {
 	has_goals:      bool,        // a level: the game is won when goals are met
 	goals:          Goals,
 	level:          int,         // index into LEVELS, when has_goals
+	// What the last step did to the board, for the page to animate (both cleared at the start of a step).
+	cleared:        Molecule,    // the molecule that just closed and was removed (count 0 when none)
+	rises:          He_Rises,    // the helium that just rose or left
 }
 
 // Endless mode: a tray that starts with one slot and gains one at each of these scores (six at most),
@@ -161,20 +164,43 @@ in_hand :: proc(g: ^Game) -> (Kind, bool) {
 	return vis[g.selected], true
 }
 
-// Endless mode: when a molecule closes, every helium rises one square (if the square above is free) and
-// those on the top row escape. Top-down, so a stack of helium rises together. Returns how many escaped.
-drift_helium :: proc(board: ^Board) -> int {
+// One helium's rise after a molecule closed (for the page to animate): from row to row in col; to_row is -1
+// when it left the board.
+He_Rise :: struct {
+	col, from_row, to_row: int,
+}
+
+He_Rises :: struct {
+	items: [BOARD_SIZE * BOARD_SIZE]He_Rise,
+	count: int,
+}
+
+// Endless mode: when a molecule closes, every helium rises as far as the empty squares above it allow,
+// stopping under the first atom in its way, and leaves the board when nothing is above it. Top-down, so a
+// stack of helium rises together (and escapes together). Returns how many escaped; rises, if given, gets
+// every helium that moved.
+drift_helium :: proc(board: ^Board, rises: ^He_Rises = nil) -> int {
 	escaped := 0
 	for row in 0 ..< BOARD_SIZE {
 		for col in 0 ..< BOARD_SIZE {
 			c := board.cells[row][col]
 			if !c.occupied || c.kind != .He { continue }
-			if row == 0 {
-				board.cells[row][col] = {}
+			to := row
+			for to > 0 && !board.cells[to - 1][col].occupied {
+				to -= 1
+			}
+			if to == 0 {
+				to = -1 // a straight shot: it leaves the board
 				escaped += 1
-			} else if !board.cells[row - 1][col].occupied {
-				board.cells[row - 1][col] = c
-				board.cells[row][col] = {}
+			}
+			if to == row { continue }
+			board.cells[row][col] = {}
+			if to >= 0 {
+				board.cells[to][col] = c
+			}
+			if rises != nil && rises.count < len(rises.items) {
+				rises.items[rises.count] = {col, row, to}
+				rises.count += 1
 			}
 		}
 	}
@@ -246,6 +272,8 @@ update_phase :: proc(g: ^Game) {
 
 step :: proc(g: ^Game, cmd: Command) {
 	g.event_count = 0
+	g.cleared.count = 0
+	g.rises.count = 0
 	if g.phase != .Playing {
 		return
 	}
@@ -278,6 +306,7 @@ step :: proc(g: ^Game, cmd: Command) {
 			g.score += total(s)
 			g.made[s.id] += 1
 			g.atoms_cleared += m.count
+			g.cleared = m
 			emit(g, {kind = .Completed, id = s.id, atoms = m.count, score = total(s), bonus = s.bonus})
 		}
 		if g.endless {
@@ -285,7 +314,7 @@ step :: proc(g: ^Game, cmd: Command) {
 			// placement is about to refill.
 			if m.count > 0 {
 				g.moves_to_he = he_interval(g.supply.size)
-				escaped := drift_helium(&g.board)
+				escaped := drift_helium(&g.board, &g.rises)
 				emit(g, {kind = .He_Drifted, atoms = escaped})
 			} else {
 				g.moves_to_he -= 1

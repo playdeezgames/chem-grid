@@ -305,14 +305,59 @@ helium_in_the_tray_must_be_played_first :: proc(t: ^testing.T) {
 }
 
 @(test)
-helium_drifts_up_and_escapes :: proc(t: ^testing.T) {
+helium_rises_as_far_as_it_can_and_escapes_on_a_straight_shot :: proc(t: ^testing.T) {
 	b: Board
-	b.cells[0][1] = {occupied = true, kind = .He}
-	b.cells[1][1] = {occupied = true, kind = .He}
-	b.cells[3][4] = {occupied = true, kind = .He}
+	he := Cell{occupied = true, kind = .He}
+	b.cells[0][1] = he // top row: escapes
+	b.cells[1][1] = he // under it: escapes too once the top one has gone
+	b.cells[6][2] = he // clear column: escapes from far down
 	b.cells[2][4] = {occupied = true, kind = .C, bonds = {.North, .East, .South, .West}}
-	testing.expect_value(t, drift_helium(&b), 1)
-	testing.expect(t, b.cells[0][1].occupied && b.cells[0][1].kind == .He)
-	testing.expect(t, !b.cells[1][1].occupied)
-	testing.expect(t, b.cells[3][4].occupied) // blocked, stays
+	b.cells[3][4] = he // right under an atom: stays
+	b.cells[7][4] = he // rises to just under the one above (row 4)
+	b.cells[7][6] = he
+	b.cells[6][6] = he
+	b.cells[1][6] = {occupied = true, kind = .H, bonds = {.South}}
+	// column 6: the stack rises together to rows 2 and 3
+	rises: He_Rises
+	testing.expect_value(t, drift_helium(&b, &rises), 3)
+	for col in 0 ..< BOARD_SIZE {
+		if col != 4 && col != 6 {
+			for row in 0 ..< BOARD_SIZE {
+				testing.expectf(t, !b.cells[row][col].occupied, "cell %d,%d should be empty", row, col)
+			}
+		}
+	}
+	testing.expect(t, b.cells[3][4].occupied && b.cells[3][4].kind == .He)
+	testing.expect(t, b.cells[4][4].occupied && b.cells[4][4].kind == .He)
+	testing.expect(t, !b.cells[7][4].occupied)
+	testing.expect(t, b.cells[2][6].occupied && b.cells[2][6].kind == .He)
+	testing.expect(t, b.cells[3][6].occupied && b.cells[3][6].kind == .He)
+	testing.expect(t, !b.cells[6][6].occupied && !b.cells[7][6].occupied)
+	testing.expect_value(t, rises.count, 6) // everything but the blocked one at (3, 4)
+	found := false
+	for r in rises.items[:rises.count] {
+		if r == {2, 6, -1} { found = true }
+	}
+	testing.expect(t, found)
+}
+
+@(test)
+closing_a_molecule_records_it_and_the_helium_rise :: proc(t: ^testing.T) {
+	g := game_endless(7)
+	g.board = {}
+	g.board.cells[5][3] = {occupied = true, kind = .He}
+	g.board.cells[0][0] = {occupied = true, kind = .H, bonds = {.East}}
+	g.supply.slots[0] = .H
+	g.selected, g.rot = 0, 0
+	// an H facing west at (0, 1) closes H2
+	for r in 0 ..< rotation_count(.H) {
+		if bonds_of(.H, r) == {.West} { g.rot = r }
+	}
+	step(&g, Place{0, 1})
+	testing.expect_value(t, g.cleared.count, 2)
+	testing.expect_value(t, g.rises.count, 1)
+	testing.expect_value(t, g.rises.items[0], He_Rise{3, 5, -1})
+	step(&g, Rotate{1})
+	testing.expect_value(t, g.cleared.count, 0)
+	testing.expect_value(t, g.rises.count, 0)
 }
