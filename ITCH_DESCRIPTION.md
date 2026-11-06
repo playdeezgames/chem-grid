@@ -3,6 +3,8 @@
 Page: https://thegrumpygamedev.itch.io/chem-grid
 Pasted in by hand; nothing here is published by the repo.
 
+Latest version: https://playdeezgames.github.io/chem-grid/ (put this near the top of the page and as an external link)
+
 ## Short description
 
 Place atoms on an 8x8 grid, match every bond, close molecules for points, and keep the helium from filling the board.

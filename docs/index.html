@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chem-Grid</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #f2efe6; color: #6b6753; font: 12px/1.4 monospace; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  canvas { image-rendering: pixelated; touch-action: none; display: block;
+           width: min(100vw, calc((100vh - 48px) * 400 / 300)); }
+  footer { margin-top: 6px; text-align: center; max-width: 90vw; }
+  footer a { color: #2b2d42; }
+</style>
+</head>
+<body>
+<canvas id="screen" width="400" height="300"></canvas>
+<footer>
+  Chem-Grid by TheGrumpyGameDev. Font DINOBYTE by mby (CC BY 4.0). Code, art and sound made by an AI agent (Claude Code) at the author's direction. Online scores by LootLocker.
+  <a href="https://thegrumpygamedev.itch.io/">itch.io</a> · <a href="https://playdeezgames.github.io/oeuvre-of-splorr/">more games</a>
+</footer>
+<script type="text/javascript" src="odin.js"></script>
+<script>
+  const cv = document.getElementById("screen");
+  const ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  const css = (rgb) => "#" + (rgb >>> 0).toString(16).padStart(6, "0");
+  const T = 32;
+  const atlas = new Image();
+  atlas.src = "art.png";
+
+  // DINOBYTE (mby, CC BY 4.0): CP437, 16x16 sheet of 6x8 cells, ink tinted at draw time.
+  const font = new Image();
+  font.src = "font.png";
+  const tinted = new Map();
+  const tintedFont = (rgb) => {
+    let c = tinted.get(rgb);
+    if (!c) {
+      c = document.createElement("canvas");
+      c.width = font.width; c.height = font.height;
+      const g = c.getContext("2d");
+      g.drawImage(font, 0, 0);
+      g.globalCompositeOperation = "source-in";
+      g.fillStyle = css(rgb);
+      g.fillRect(0, 0, c.width, c.height);
+      tinted.set(rgb, c);
+    }
+    return c;
+  };
+  const drawText = (x, y, str, rgb, scale) => {
+    if (!font.complete || !font.width) return;
+    const sheet = tintedFont(rgb);
+    let px = Math.round(x);
+    for (let i = 0; i < str.length; i++) {
+      const code = str.charCodeAt(i) & 255;
+      ctx.drawImage(sheet, (code % 16) * 6, Math.floor(code / 16) * 8, 6, 8,
+                    px, Math.round(y), 6 * scale, 8 * scale);
+      px += 6 * scale;
+    }
+  };
+
+  // Order must match `Sound` in src/game/art.odin.
+  const SOUND_FILES = ["place", "rotate", "invalid", "molecule", "recognised", "game_over", "win", "molecule_big"]
+    .map((n) => "sfx/" + n + ".wav");
+  const sounds = [];
+  let audio = null;
+  const unlock = () => {
+    if (audio) return;
+    try {
+      audio = new (window.AudioContext || window.webkitAudioContext)();
+      SOUND_FILES.forEach((f, i) => fetch(f).then((r) => r.arrayBuffer())
+        .then((b) => audio.decodeAudioData(b)).then((buf) => { sounds[i] = buf; }).catch(() => {}));
+    } catch (e) { audio = null; }
+  };
+  for (const ev of ["keydown", "pointerdown"]) window.addEventListener(ev, unlock);
+
+  // LootLocker online top scores (endless mode). The key is the game's public client key, not a secret.
+  // LootLocker has no separate stage and live data: this one key is the live board. Every host that serves
+  // the page (itch.io serves it from https://html-classic.itch.zone) must be on the console's CORS Allowlist.
+  // ?board=test uses the test board, so testing never puts scores on the real one.
+  const LL = {
+    // LootLocker game Chem-Grid (console id 108545); boards 37855 (live) and 37856 (test). Empty means offline.
+    domain: "https://1erks4hq.api.lootlocker.com",
+    key: "dev_ab5a123fadbb4b5eb088422d7257219d",
+    version: "1.0.0",
+    board: new URLSearchParams(location.search).get("board") === "test" ? "chemgrid_endless_test" : "chemgrid_endless",
+    count: 10,
+  };
+  const BOARD = { READY: 2, FAILED: 3 }; // game.Board_Status
+  const NAME_LEN = 16; // game.NAME_LEN
+  const pick = (key, make) => {
+    try {
+      let v = localStorage.getItem(key);
+      if (!v) { v = make(); localStorage.setItem(key, v); }
+      return v;
+    } catch (e) { return make(); }
+  };
+  // An anonymous id for this browser; LootLocker's guest login keys the player on it.
+  const playerId = pick("chem-grid-player", () =>
+    Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join(""));
+  let playerName = ""; // set by the game through scores_name
+  const llCall = async (method, path, token, body) => {
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers["x-session-token"] = token;
+    const r = await fetch(LL.domain + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    if (!r.ok) throw new Error(path + " " + r.status);
+    return r.json();
+  };
+  let session = null, sessionPending = null, serverName = null;
+  const signIn = () => {
+    if (!LL.key || !LL.domain) return Promise.reject(new Error("no LootLocker key"));
+    if (session) return Promise.resolve(session);
+    if (!sessionPending) {
+      sessionPending = (async () => {
+        const s = await llCall("POST", "/game/v2/session/guest", null, {
+          // development_mode as JetLag sends it; it no longer selects different data.
+          game_key: LL.key, game_version: LL.version, development_mode: true, player_identifier: playerId,
+        });
+        session = { token: s.session_token, player: String(s.player_id) };
+        serverName = s.player_name || "";
+        return session;
+      })().finally(() => { sessionPending = null; });
+    }
+    return sessionPending;
+  };
+  // A call with a session whose name is up to date; a stale session (tokens expire) is replaced once.
+  const withSession = async (fn) => {
+    const run = async () => {
+      const s = await signIn();
+      if (playerName && serverName !== playerName) {
+        await llCall("PATCH", "/game/player/name", s.token, { name: playerName });
+        serverName = playerName;
+      }
+      return fn(s);
+    };
+    try { return await run(); } catch (e) { session = null; return run(); }
+  };
+  const putName = (text) => {
+    const clean = String(text).replace(/[^\x20-\x7e]/g, "?").slice(0, NAME_LEN);
+    const bytes = new Uint8Array(memory.memory.buffer, memory.exports.scores_scratch(), NAME_LEN);
+    for (let i = 0; i < clean.length; i++) bytes[i] = clean.charCodeAt(i);
+    return clean.length;
+  };
+  const loadBoard = async () => {
+    try {
+      const list = await withSession((s) =>
+        llCall("GET", "/game/leaderboards/" + LL.board + "/list?count=" + LL.count, s.token));
+      memory.exports.scores_begin();
+      for (const row of list.items || []) {
+        const name = (row.player && (row.player.name || row.player.public_uid)) || "?";
+        memory.exports.scores_add(Math.min(Number(row.score) || 0, 2147483647), putName(name));
+      }
+      memory.exports.scores_status(BOARD.READY);
+    } catch (e) {
+      memory.exports.scores_status(BOARD.FAILED);
+    }
+  };
+  const submitScore = async (score) => {
+    let ok = 0;
+    try {
+      await withSession((s) =>
+        llCall("POST", "/game/leaderboards/" + LL.board + "/submit", s.token, { member_id: s.player, score }));
+      ok = 1;
+    } catch (e) { /* the score just does not go up; the game plays on */ }
+    memory.exports.scores_sent(ok);
+  };
+
+  const memory = new odin.WasmMemoryInterface();
+  odin.runWasm("game.wasm", null, {
+    canvas: {
+      fill_rect: (x, y, w, h, rgb, alpha) => {
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = css(rgb);
+        ctx.fillRect(x, y, w, h);
+        ctx.globalAlpha = 1;
+      },
+      blit: (sprite, x, y, alpha) => {
+        if (!atlas.complete || !atlas.width) return;
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(atlas, sprite * T, 0, T, T, x, y, T, T);
+        ctx.globalAlpha = 1;
+      },
+      play_sound: (id) => {
+        if (!audio || !sounds[id]) return;
+        if (audio.state === "suspended") audio.resume();
+        const src = audio.createBufferSource();
+        const gain = audio.createGain();
+        gain.gain.value = 0.3;
+        src.buffer = sounds[id];
+        src.connect(gain).connect(audio.destination);
+        src.start();
+      },
+      storage_get: (kp, kl, bp, cap) => {
+        try {
+          const v = localStorage.getItem(memory.loadString(kp, kl));
+          if (v === null) return -1;
+          const bytes = new TextEncoder().encode(v);
+          if (bytes.length > cap) return -2;
+          new Uint8Array(memory.memory.buffer, bp, bytes.length).set(bytes);
+          return bytes.length;
+        } catch (e) { return -1; }
+      },
+      storage_set: (kp, kl, vp, vl) => {
+        try { localStorage.setItem(memory.loadString(kp, kl), memory.loadString(vp, vl)); } catch (e) {}
+      },
+      draw_text: (x, y, ptr, len, rgb, scale) => {
+        drawText(x, y, memory.loadString(ptr, len), rgb, scale);
+      },
+      // The name goes to the server with the next call that signs in (renaming waits for a reason to call).
+      scores_name: (ptr, len) => { playerName = memory.loadString(ptr, len); },
+      scores_refresh: () => { loadBoard(); },
+      scores_submit: (score) => { submitScore(score); },
+    },
+  }, memory);
+
+  // Pointer input, in the 400x300 logical screen. Only a mouse hovers; a finger or pen needs a confirming second tap.
+  const logical = (e) => {
+    const r = cv.getBoundingClientRect();
+    return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height];
+  };
+  const call = (name, ...args) => { const f = memory.exports[name]; if (f) f(...args); };
+  cv.addEventListener("pointermove", (e) => {
+    if (e.pointerType === "mouse") { const [x, y] = logical(e); call("pointer_move", x, y); }
+  });
+  cv.addEventListener("pointerleave", () => call("pointer_leave"));
+  cv.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    const [x, y] = logical(e);
+    if (e.pointerType === "mouse" && e.button === 2) { call("rotate_input", 1); return; }
+    call("pointer_down", x, y, e.pointerType === "mouse" ? 1 : 0);
+  });
+  cv.addEventListener("contextmenu", (e) => e.preventDefault());
+  cv.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    call("rotate_input", e.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
+</script>
+</body>
+</html>
