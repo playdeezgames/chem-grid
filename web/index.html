@@ -68,6 +68,96 @@
   };
   for (const ev of ["keydown", "pointerdown"]) window.addEventListener(ev, unlock);
 
+  // LootLocker online top scores (endless mode). The key is the game's public client key, not a secret.
+  // LootLocker has no separate stage and live data: this one key is the live board. Every host that serves
+  // the page (itch.io serves it from https://html-classic.itch.zone) must be on the console's CORS Allowlist.
+  // ?board=test uses the test board, so testing never puts scores on the real one.
+  const LL = {
+    domain: "", // https://xxxxxxxx.api.lootlocker.com (from the console); empty means offline
+    key: "", // dev_...
+    version: "1.0.0",
+    board: new URLSearchParams(location.search).get("board") === "test" ? "chemgrid_endless_test" : "chemgrid_endless",
+    count: 10,
+  };
+  const BOARD = { READY: 2, FAILED: 3 }; // game.Board_Status
+  const NAME_LEN = 16; // game.NAME_LEN
+  const pick = (key, make) => {
+    try {
+      let v = localStorage.getItem(key);
+      if (!v) { v = make(); localStorage.setItem(key, v); }
+      return v;
+    } catch (e) { return make(); }
+  };
+  // An anonymous id for this browser; LootLocker's guest login keys the player on it.
+  const playerId = pick("chem-grid-player", () =>
+    Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join(""));
+  let playerName = ""; // set by the game through scores_name
+  const llCall = async (method, path, token, body) => {
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers["x-session-token"] = token;
+    const r = await fetch(LL.domain + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    if (!r.ok) throw new Error(path + " " + r.status);
+    return r.json();
+  };
+  let session = null, sessionPending = null, serverName = null;
+  const signIn = () => {
+    if (!LL.key || !LL.domain) return Promise.reject(new Error("no LootLocker key"));
+    if (session) return Promise.resolve(session);
+    if (!sessionPending) {
+      sessionPending = (async () => {
+        const s = await llCall("POST", "/game/v2/session/guest", null, {
+          // development_mode as JetLag sends it; it no longer selects different data.
+          game_key: LL.key, game_version: LL.version, development_mode: true, player_identifier: playerId,
+        });
+        session = { token: s.session_token, player: String(s.player_id) };
+        serverName = s.player_name || "";
+        return session;
+      })().finally(() => { sessionPending = null; });
+    }
+    return sessionPending;
+  };
+  // A call with a session whose name is up to date; a stale session (tokens expire) is replaced once.
+  const withSession = async (fn) => {
+    const run = async () => {
+      const s = await signIn();
+      if (playerName && serverName !== playerName) {
+        await llCall("PATCH", "/game/player/name", s.token, { name: playerName });
+        serverName = playerName;
+      }
+      return fn(s);
+    };
+    try { return await run(); } catch (e) { session = null; return run(); }
+  };
+  const putName = (text) => {
+    const clean = String(text).replace(/[^\x20-\x7e]/g, "?").slice(0, NAME_LEN);
+    const bytes = new Uint8Array(memory.memory.buffer, memory.exports.scores_scratch(), NAME_LEN);
+    for (let i = 0; i < clean.length; i++) bytes[i] = clean.charCodeAt(i);
+    return clean.length;
+  };
+  const loadBoard = async () => {
+    try {
+      const list = await withSession((s) =>
+        llCall("GET", "/game/leaderboards/" + LL.board + "/list?count=" + LL.count, s.token));
+      memory.exports.scores_begin();
+      for (const row of list.items || []) {
+        const name = (row.player && (row.player.name || row.player.public_uid)) || "?";
+        memory.exports.scores_add(Math.min(Number(row.score) || 0, 2147483647), putName(name));
+      }
+      memory.exports.scores_status(BOARD.READY);
+    } catch (e) {
+      memory.exports.scores_status(BOARD.FAILED);
+    }
+  };
+  const submitScore = async (score) => {
+    let ok = 0;
+    try {
+      await withSession((s) =>
+        llCall("POST", "/game/leaderboards/" + LL.board + "/submit", s.token, { member_id: s.player, score }));
+      ok = 1;
+    } catch (e) { /* the score just does not go up; the game plays on */ }
+    memory.exports.scores_sent(ok);
+  };
+
   const memory = new odin.WasmMemoryInterface();
   odin.runWasm("game.wasm", null, {
     canvas: {
@@ -109,6 +199,10 @@
       draw_text: (x, y, ptr, len, rgb, scale) => {
         drawText(x, y, memory.loadString(ptr, len), rgb, scale);
       },
+      // The name goes to the server with the next call that signs in (renaming waits for a reason to call).
+      scores_name: (ptr, len) => { playerName = memory.loadString(ptr, len); },
+      scores_refresh: () => { loadBoard(); },
+      scores_submit: (score) => { submitScore(score); },
     },
   }, memory);
 

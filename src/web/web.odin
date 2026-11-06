@@ -23,6 +23,12 @@ foreign canvas {
 	// there is none (or storage is unavailable) and -2 when it does not fit.
 	storage_get :: proc(key: string, buf: [^]u8, cap: i32) -> i32 ---
 	storage_set :: proc(key: string, value: string) ---
+	// Online top scores (LootLocker, run by the page; endless mode only). scores_name gives the page the
+	// player's name (it renames on the server); scores_refresh asks for the rows, which come back through
+	// the scores_begin, scores_add and scores_status exports; scores_submit answers through scores_sent.
+	scores_name :: proc(name: string) ---
+	scores_refresh :: proc() ---
+	scores_submit :: proc(score: i32) ---
 }
 
 INK :: 0x2b2d42
@@ -42,6 +48,8 @@ Screen :: enum {
 	Title,
 	Select, // pick a level
 	Play,
+	Scores, // online top scores
+	Name, // type the name shown on the scores
 }
 
 Rect :: struct {
@@ -62,10 +70,39 @@ save: game.Save
 new_best: bool // the run that just ended set a record
 
 SAVE_KEY :: "chem-grid-save"
+NAME_KEY :: "chem-grid-name" // the name on the online scores
+ASKED_KEY :: "chem-grid-name-asked" // "1" once the name screen was skipped, "2" once a name was typed
+
+board: game.Score_Board
+board_scratch: [game.NAME_LEN]u8 // the page writes a row's name here before calling scores_add
+player_name: game.Name_Edit // the name in use (never empty)
+name_edit: game.Name_Edit // the name being typed on the Name screen
+name_asked: bool
+name_chosen: bool // the player typed the name in use (otherwise it is the random one)
+name_back: Screen // where the Name screen returns to
+scores_back: Screen // where the Scores screen returns to
+pending_score: int // an endless score waiting for the Name screen before it is sent
 
 main :: proc() {
 	js.add_window_event_listener(.Key_Down, nil, on_key)
 	load_save()
+	load_name()
+}
+
+// The name and the asked flag live in their own keys, so the save line stays as it is.
+load_name :: proc() {
+	buf: [64]u8
+	if n := storage_get(NAME_KEY, raw_data(buf[:]), i32(len(buf))); n > 0 {
+		game.name_load(&player_name, string(buf[:n]))
+	}
+	if _, ok := game.name_finish(&player_name); !ok {
+		game.name_load(&player_name, fmt.tprintf("CHEMIST-%d", 1000 + int(u64(time.now()._nsec) / 1_000_000 * 2654435761 % 9000)))
+		storage_set(NAME_KEY, game.name_text(&player_name))
+	}
+	n := storage_get(ASKED_KEY, raw_data(buf[:]), i32(len(buf)))
+	name_asked = n > 0
+	name_chosen = n == 1 && buf[0] == '2'
+	scores_name(game.name_text(&player_name))
 }
 
 // A save that fails to read or validate is ignored whole: defaults stay.
@@ -101,6 +138,76 @@ begin :: proc() {
 	hover_set = false
 	new_best = false
 	msg = ""
+	board.submit = .None
+}
+
+open_scores :: proc(back: Screen) {
+	scores_back = back
+	screen = .Scores
+	board.status = .Loading
+	scores_refresh()
+}
+
+open_name :: proc(back: Screen) {
+	name_edit = name_chosen ? player_name : {} // a random name is not worth editing
+	name_back = back
+	screen = .Name
+}
+
+// OK (accept) or Skip/Cancel on the Name screen. An empty name cannot be accepted. The first time, either
+// answer counts as asked, and a score waiting for the name is sent.
+close_name :: proc(accept: bool) {
+	renamed := false
+	if accept {
+		name, ok := game.name_finish(&name_edit)
+		if !ok {
+			beep(.Invalid)
+			return
+		}
+		if name != game.name_text(&player_name) {
+			player_name = name_edit
+			storage_set(NAME_KEY, game.name_text(&player_name))
+			scores_name(game.name_text(&player_name))
+			renamed = true
+		}
+	}
+	if accept {
+		name_chosen = true
+	}
+	if !name_asked || accept {
+		name_asked = true
+		storage_set(ASKED_KEY, name_chosen ? "2" : "1")
+	}
+	if name_back == .Scores {
+		if renamed {
+			open_scores(scores_back) // reload, which renames on the server first
+		} else {
+			screen = .Scores
+		}
+		return
+	}
+	screen = name_back
+	if pending_score > 0 {
+		score := pending_score
+		pending_score = 0
+		board.submit = .Sending
+		scores_submit(i32(score))
+	}
+}
+
+// An endless game ended: send its score, asking for a name first if that has never been done.
+send_score :: proc(score: int) {
+	board.submit = .None
+	if score <= 0 {
+		return
+	}
+	if !name_asked {
+		pending_score = score
+		open_name(.Play)
+		return
+	}
+	board.submit = .Sending
+	scores_submit(i32(score))
 }
 
 start_endless :: proc() {
@@ -159,9 +266,31 @@ menu_button := Rect{BUTTON_X, 214, BUTTON_W, 20}
 sound_button := Rect{BUTTON_X, 238, BUTTON_W, 20}
 endless_button := Rect{140, 136, 120, 26}
 levels_button := Rect{140, 170, 120, 26}
+scores_button := Rect{140, 204, 120, 26}
 back_button := Rect{12, 270, 100, 22}
+change_name_button := Rect{140, 270, 120, 22}
 overlay_primary_button := Rect{BOARD_X + BOARD_PX / 2 - 70, 176, 140, 22}
 overlay_secondary_button := Rect{BOARD_X + BOARD_PX / 2 - 70, 204, 140, 22}
+overlay_scores_button := Rect{BOARD_X + BOARD_PX / 2 - 70, 232, 140, 22} // endless only
+name_ok_button := Rect{80, 236, 110, 24}
+name_skip_button := Rect{210, 236, 110, 24}
+
+// The on-screen keys of the Name screen; a last key, DEL, follows them. A variable, so it can be indexed.
+name_keys := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789- "
+KEY_COLS :: 10
+
+key_rect :: proc(i: int) -> Rect {
+	return {f32(30 + (i % KEY_COLS) * 34), f32(96 + (i / KEY_COLS) * 30), 32, 26}
+}
+
+// press_key types on-screen key i (the last one is DEL).
+press_key :: proc(i: int) {
+	if i == len(name_keys) {
+		game.name_backspace(&name_edit)
+	} else if !game.name_type(&name_edit, name_keys[i]) {
+		beep(.Invalid)
+	}
+}
 
 LEVEL_ROWS :: 10 // levels per column on the select screen
 
@@ -211,6 +340,7 @@ take_events :: proc() {
 			if !play.has_goals {
 				new_best = game.record_endless(&save, play.score)
 				store_save()
+				send_score(play.score)
 			}
 		case .He_Drifted:
 			if e.atoms > 0 {
@@ -261,9 +391,32 @@ on_key :: proc(e: js.Event) {
 	code := e.key.code
 	handled := true
 	switch screen {
+	case .Name:
+		switch code {
+		case "Enter", "NumpadEnter": close_name(true)
+		case "Escape": close_name(false)
+		case "Backspace": game.name_backspace(&name_edit)
+		case:
+			k := e.key.key
+			if len(k) == 1 && !e.key.ctrl && !e.key.meta && !e.key.alt {
+				if !game.name_type(&name_edit, k[0]) {
+					beep(.Invalid)
+				}
+			} else {
+				handled = false
+			}
+		}
+	case .Scores:
+		switch code {
+		case "Escape": screen = scores_back
+		case "KeyN": open_name(.Scores)
+		case "KeyM": toggle_mute()
+		case: handled = false
+		}
 	case .Title:
 		switch code {
 		case "Enter", "Space": start_endless()
+		case "KeyT": open_scores(.Title)
 		case "KeyL": screen = .Select
 		case "KeyM": toggle_mute()
 		case: handled = false
@@ -285,6 +438,12 @@ on_key :: proc(e: js.Event) {
 			case "Enter", "Space": overlay_primary()
 			case "Escape": leave()
 			case "KeyM": toggle_mute()
+			case "KeyT":
+				if !play.has_goals {
+					open_scores(.Play)
+				} else {
+					handled = false
+				}
 			case: handled = false
 			}
 			break
@@ -326,11 +485,30 @@ pointer_leave :: proc "c" () {
 pointer_down :: proc "c" (x, y: f32, precise: i32) {
 	context = runtime.default_context()
 	switch screen {
+	case .Name:
+		for i in 0 ..= len(name_keys) {
+			if in_rect(key_rect(i), x, y) {
+				press_key(i)
+			}
+		}
+		if in_rect(name_ok_button, x, y) {
+			close_name(true)
+		} else if in_rect(name_skip_button, x, y) {
+			close_name(false)
+		}
+	case .Scores:
+		if in_rect(back_button, x, y) {
+			screen = scores_back
+		} else if in_rect(change_name_button, x, y) {
+			open_name(.Scores)
+		}
 	case .Title:
 		if in_rect(endless_button, x, y) {
 			start_endless()
 		} else if in_rect(levels_button, x, y) {
 			screen = .Select
+		} else if in_rect(scores_button, x, y) {
+			open_scores(.Title)
 		}
 	case .Select:
 		if in_rect(back_button, x, y) {
@@ -348,6 +526,8 @@ pointer_down :: proc "c" (x, y: f32, precise: i32) {
 				overlay_primary()
 			} else if in_rect(overlay_secondary_button, x, y) {
 				leave()
+			} else if !play.has_goals && in_rect(overlay_scores_button, x, y) {
+				open_scores(.Play)
 			}
 			return
 		}
@@ -391,6 +571,43 @@ qa_start :: proc "c" (index: i32) {
 		start_endless()
 	} else {
 		start_level(int(index))
+	}
+}
+
+// ---- online scores, answered by the page ----
+
+// The page writes a row's name (printable ASCII, at most NAME_LEN bytes) here before scores_add.
+@(export)
+scores_scratch :: proc "c" () -> rawptr {
+	return &board_scratch
+}
+
+// scores_begin clears the rows; the page then calls scores_add for each, then scores_status.
+@(export)
+scores_begin :: proc "c" () {
+	context = runtime.default_context()
+	game.scores_begin(&board)
+}
+
+@(export)
+scores_add :: proc "c" (score, n: i32) {
+	context = runtime.default_context()
+	game.scores_add(&board, board_scratch[:clamp(int(n), 0, len(board_scratch))], int(score))
+}
+
+// s is a game.Board_Status: 2 Ready after the rows, 3 Failed when the request did not work.
+@(export)
+scores_status :: proc "c" (s: i32) {
+	if s >= 0 && s <= i32(max(game.Board_Status)) {
+		board.status = game.Board_Status(s)
+	}
+}
+
+// The answer to scores_submit: ok is 1 when the score was taken.
+@(export)
+scores_sent :: proc "c" (ok: i32) {
+	if board.submit == .Sending {
+		board.submit = ok != 0 ? .Sent : .Failed
 	}
 }
 
@@ -442,7 +659,63 @@ draw :: proc() {
 	case .Title:  draw_title()
 	case .Select: draw_select()
 	case .Play:   draw_play()
+	case .Scores: draw_scores()
+	case .Name:   draw_name()
 	}
+}
+
+draw_scores :: proc() {
+	draw_centered(200, 10, "TOP SCORES", INK, 2)
+	draw_centered(200, 30, "Endless mode, online", DIM, 1)
+	me := game.name_text(&player_name)
+	switch board.status {
+	case .Idle, .Loading:
+		draw_centered(200, 120, "LOADING...", DIM, 1)
+	case .Failed:
+		draw_centered(200, 114, "COULD NOT REACH THE SCORES", ACCENT, 1)
+		draw_centered(200, 128, "Offline? The game plays on without them.", DIM, 1)
+	case .Ready:
+		if board.count == 0 {
+			draw_centered(200, 120, "NO SCORES YET. BE THE FIRST!", DIM, 1)
+		}
+		for i in 0 ..< board.count {
+			e := &board.rows[i]
+			y := f32(48 + i * 18)
+			color: u32 = game.entry_name(e) == me ? GOOD : INK
+			rank := fmt.tprintf("%d.", i + 1)
+			draw_text(110 - text_w(rank, 1), y, rank, DIM, 1)
+			draw_text(118, y, game.entry_name(e), color, 1)
+			score := fmt.tprintf("%d", e.score)
+			draw_text(290 - text_w(score, 1), y, score, color, 1)
+		}
+	}
+	draw_centered(200, 240, fmt.tprintf("You: %s", me), INK, 1)
+	draw_button(back_button, "BACK (ESC)")
+	draw_button(change_name_button, "CHANGE NAME (N)")
+}
+
+draw_name :: proc() {
+	draw_centered(200, 14, "YOUR NAME", INK, 2)
+	note := "Shown on the online top scores."
+	if pending_score > 0 {
+		note = fmt.tprintf("Your score of %d goes on the online top scores.", pending_score)
+	}
+	draw_centered(200, 38, note, DIM, 1)
+	fill_rect(98, 56, 204, 28, INK, 1)
+	fill_rect(99, 57, 202, 26, BACK, 1)
+	draw_text(104, 62, game.name_text(&name_edit), INK, 2)
+	if name_edit.len < game.NAME_LEN {
+		fill_rect(f32(104 + name_edit.len * 12), 77, 10, 2, ACCENT, 1)
+	}
+	for i in 0 ..= len(name_keys) {
+		label := "DEL"
+		if i < len(name_keys) {
+			label = name_keys[i] == ' ' ? "SPC" : name_keys[i:i + 1]
+		}
+		draw_button(key_rect(i), label)
+	}
+	draw_button(name_ok_button, "OK (ENTER)", name_edit.len > 0)
+	draw_button(name_skip_button, name_asked ? "CANCEL (ESC)" : "SKIP (ESC)")
 }
 
 draw_title :: proc() {
@@ -451,11 +724,12 @@ draw_title :: proc() {
 	draw_centered(200, 104, "Close a molecule and it scores.", DIM, 1)
 	draw_button(endless_button, "ENDLESS")
 	draw_button(levels_button, "LEVELS (L)")
+	draw_button(scores_button, "TOP SCORES (T)")
 	if save.endless_best > 0 {
-		draw_centered(200, 204, fmt.tprintf("Best endless score: %d", save.endless_best), DIM, 1)
+		draw_centered(200, 238, fmt.tprintf("Best endless score: %d", save.endless_best), DIM, 1)
 	}
-	draw_centered(200, 222, "Mouse: click to place, R or wheel to rotate", DIM, 1)
-	draw_centered(200, 234, "Touch: tap a cell, tap it again to place", DIM, 1)
+	draw_centered(200, 254, "Mouse: click to place, R or wheel to rotate", DIM, 1)
+	draw_centered(200, 266, "Touch: tap a cell, tap it again to place", DIM, 1)
 	draw_centered(200, 284, "Font DINOBYTE by mby, CC BY 4.0", DIM, 1)
 }
 
@@ -644,6 +918,14 @@ draw_play :: proc() {
 		draw_centered(cx, 132, note, DIM, 1)
 		if new_best {
 			draw_centered(cx, 148, "NEW BEST!", GOOD, 1)
+		}
+		#partial switch board.submit {
+		case .Sending: draw_centered(cx, 160, "SENDING SCORE...", DIM, 1)
+		case .Sent:    draw_centered(cx, 160, "SCORE SENT ONLINE", GOOD, 1)
+		case .Failed:  draw_centered(cx, 160, "COULD NOT SEND SCORE", ACCENT, 1)
+		}
+		if !play.has_goals {
+			draw_button(overlay_scores_button, "TOP SCORES (T)")
 		}
 		primary := "PLAY AGAIN"
 		if play.has_goals {
