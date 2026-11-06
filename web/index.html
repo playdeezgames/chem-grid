@@ -73,8 +73,9 @@
   // the page (itch.io serves it from https://html-classic.itch.zone) must be on the console's CORS Allowlist.
   // ?board=test uses the test board, so testing never puts scores on the real one.
   const LL = {
-    domain: "", // https://xxxxxxxx.api.lootlocker.com (from the console); empty means offline
-    key: "", // dev_...
+    // LootLocker game Chem-Grid (console id 108545); boards 37855 (live) and 37856 (test). Empty means offline.
+    domain: "https://1erks4hq.api.lootlocker.com",
+    key: "dev_ab5a123fadbb4b5eb088422d7257219d",
     version: "1.0.0",
     board: new URLSearchParams(location.search).get("board") === "test" ? "chemgrid_endless_test" : "chemgrid_endless",
     count: 10,
