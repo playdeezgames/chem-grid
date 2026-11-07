@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:sys/wasm/js"
 import "core:time"
 import "cg:game"
+import ll "cg:lootlocker"
 
 foreign import canvas "canvas"
 @(default_calling_convention = "contextless")
@@ -23,12 +24,6 @@ foreign canvas {
 	// there is none (or storage is unavailable) and -2 when it does not fit.
 	storage_get :: proc(key: string, buf: [^]u8, cap: i32) -> i32 ---
 	storage_set :: proc(key: string, value: string) ---
-	// Online top scores (LootLocker, run by the page; endless mode only). scores_name gives the page the
-	// player's name (it renames on the server); scores_refresh asks for the rows, which come back through
-	// the scores_begin, scores_add and scores_status exports; scores_submit answers through scores_sent.
-	scores_name :: proc(name: string) ---
-	scores_refresh :: proc() ---
-	scores_submit :: proc(score: i32) ---
 }
 
 INK :: 0x2b2d42
@@ -73,10 +68,9 @@ SAVE_KEY :: "chem-grid-save"
 NAME_KEY :: "chem-grid-name" // the name on the online scores
 ASKED_KEY :: "chem-grid-name-asked" // "1" once the name screen was skipped, "2" once a name was typed
 
-board: game.Score_Board
-board_scratch: [game.NAME_LEN]u8 // the page writes a row's name here before calling scores_add
-player_name: game.Name_Edit // the name in use (never empty)
-name_edit: game.Name_Edit // the name being typed on the Name screen
+BOARD_KEY :: "chemgrid_endless" // online top scores, endless mode only (the page maps it to the test board on ?board=test)
+player_name: ll.Name_Edit // the name in use (never empty)
+name_edit: ll.Name_Edit // the name being typed on the Name screen
 name_asked: bool
 name_chosen: bool // the player typed the name in use (otherwise it is the random one)
 name_back: Screen // where the Name screen returns to
@@ -93,16 +87,16 @@ main :: proc() {
 load_name :: proc() {
 	buf: [64]u8
 	if n := storage_get(NAME_KEY, raw_data(buf[:]), i32(len(buf))); n > 0 {
-		game.name_load(&player_name, string(buf[:n]))
+		ll.name_load(&player_name, string(buf[:n]))
 	}
-	if _, ok := game.name_finish(&player_name); !ok {
-		game.name_load(&player_name, fmt.tprintf("CHEMIST-%d", 1000 + int(u64(time.now()._nsec) / 1_000_000 * 2654435761 % 9000)))
-		storage_set(NAME_KEY, game.name_text(&player_name))
+	if _, ok := ll.name_finish(&player_name); !ok {
+		ll.name_load(&player_name, fmt.tprintf("CHEMIST-%d", 1000 + int(u64(time.now()._nsec) / 1_000_000 * 2654435761 % 9000)))
+		storage_set(NAME_KEY, ll.name_text(&player_name))
 	}
 	n := storage_get(ASKED_KEY, raw_data(buf[:]), i32(len(buf)))
 	name_asked = n > 0
 	name_chosen = n == 1 && buf[0] == '2'
-	scores_name(game.name_text(&player_name))
+	ll.set_name(ll.name_text(&player_name))
 }
 
 // A save that fails to read or validate is ignored whole: defaults stay.
@@ -138,15 +132,14 @@ begin :: proc() {
 	hover_set = false
 	new_best = false
 	msg = ""
-	board.submit = .None
+	ll.board.submit = .None
 	anim_on = false
 }
 
 open_scores :: proc(back: Screen) {
 	scores_back = back
 	screen = .Scores
-	board.status = .Loading
-	scores_refresh()
+	ll.refresh(BOARD_KEY)
 }
 
 open_name :: proc(back: Screen) {
@@ -160,15 +153,15 @@ open_name :: proc(back: Screen) {
 close_name :: proc(accept: bool) {
 	renamed := false
 	if accept {
-		name, ok := game.name_finish(&name_edit)
+		name, ok := ll.name_finish(&name_edit)
 		if !ok {
 			beep(.Invalid)
 			return
 		}
-		if name != game.name_text(&player_name) {
+		if name != ll.name_text(&player_name) {
 			player_name = name_edit
-			storage_set(NAME_KEY, game.name_text(&player_name))
-			scores_name(game.name_text(&player_name))
+			storage_set(NAME_KEY, ll.name_text(&player_name))
+			ll.set_name(ll.name_text(&player_name))
 			renamed = true
 		}
 	}
@@ -191,14 +184,13 @@ close_name :: proc(accept: bool) {
 	if pending_score > 0 {
 		score := pending_score
 		pending_score = 0
-		board.submit = .Sending
-		scores_submit(i32(score))
+		ll.submit(BOARD_KEY, score)
 	}
 }
 
 // An endless game ended: send its score, asking for a name first if that has never been done.
 send_score :: proc(score: int) {
-	board.submit = .None
+	ll.board.submit = .None
 	if score <= 0 {
 		return
 	}
@@ -207,8 +199,7 @@ send_score :: proc(score: int) {
 		open_name(.Play)
 		return
 	}
-	board.submit = .Sending
-	scores_submit(i32(score))
+	ll.submit(BOARD_KEY, score)
 }
 
 start_endless :: proc() {
@@ -287,8 +278,8 @@ key_rect :: proc(i: int) -> Rect {
 // press_key types on-screen key i (the last one is DEL).
 press_key :: proc(i: int) {
 	if i == len(name_keys) {
-		game.name_backspace(&name_edit)
-	} else if !game.name_type(&name_edit, name_keys[i]) {
+		ll.name_backspace(&name_edit)
+	} else if !ll.name_type(&name_edit, name_keys[i]) {
 		beep(.Invalid)
 	}
 }
@@ -473,11 +464,11 @@ on_key :: proc(e: js.Event) {
 		switch code {
 		case "Enter", "NumpadEnter": close_name(true)
 		case "Escape": close_name(false)
-		case "Backspace": game.name_backspace(&name_edit)
+		case "Backspace": ll.name_backspace(&name_edit)
 		case:
 			k := e.key.key
 			if len(k) == 1 && !e.key.ctrl && !e.key.meta && !e.key.alt {
-				if !game.name_type(&name_edit, k[0]) {
+				if !ll.name_type(&name_edit, k[0]) {
 					beep(.Invalid)
 				}
 			} else {
@@ -658,43 +649,6 @@ qa_start :: proc "c" (index: i32) {
 	}
 }
 
-// ---- online scores, answered by the page ----
-
-// The page writes a row's name (printable ASCII, at most NAME_LEN bytes) here before scores_add.
-@(export)
-scores_scratch :: proc "c" () -> rawptr {
-	return &board_scratch
-}
-
-// scores_begin clears the rows; the page then calls scores_add for each, then scores_status.
-@(export)
-scores_begin :: proc "c" () {
-	context = runtime.default_context()
-	game.scores_begin(&board)
-}
-
-@(export)
-scores_add :: proc "c" (score, n: i32) {
-	context = runtime.default_context()
-	game.scores_add(&board, board_scratch[:clamp(int(n), 0, len(board_scratch))], int(score))
-}
-
-// s is a game.Board_Status: 2 Ready after the rows, 3 Failed when the request did not work.
-@(export)
-scores_status :: proc "c" (s: i32) {
-	if s >= 0 && s <= i32(max(game.Board_Status)) {
-		board.status = game.Board_Status(s)
-	}
-}
-
-// The answer to scores_submit: ok is 1 when the score was taken.
-@(export)
-scores_sent :: proc "c" (ok: i32) {
-	if board.submit == .Sending {
-		board.submit = ok != 0 ? .Sent : .Failed
-	}
-}
-
 // Wheel or right click: rotate.
 @(export)
 rotate_input :: proc "c" (turns: i32) {
@@ -752,24 +706,24 @@ draw :: proc() {
 draw_scores :: proc() {
 	draw_centered(200, 10, "TOP SCORES", INK, 2)
 	draw_centered(200, 30, "Endless mode, online", DIM, 1)
-	me := game.name_text(&player_name)
-	switch board.status {
+	me := ll.name_text(&player_name)
+	switch ll.board.status {
 	case .Idle, .Loading:
 		draw_centered(200, 120, "LOADING...", DIM, 1)
 	case .Failed:
 		draw_centered(200, 114, "COULD NOT REACH THE SCORES", ACCENT, 1)
 		draw_centered(200, 128, "Offline? The game plays on without them.", DIM, 1)
 	case .Ready:
-		if board.count == 0 {
+		if ll.board.count == 0 {
 			draw_centered(200, 120, "NO SCORES YET. BE THE FIRST!", DIM, 1)
 		}
-		for i in 0 ..< board.count {
-			e := &board.rows[i]
+		for i in 0 ..< ll.board.count {
+			e := &ll.board.rows[i]
 			y := f32(48 + i * 18)
-			color: u32 = game.entry_name(e) == me ? GOOD : INK
+			color: u32 = e.mine ? GOOD : INK
 			rank := fmt.tprintf("%d.", i + 1)
 			draw_text(110 - text_w(rank, 1), y, rank, DIM, 1)
-			draw_text(118, y, game.entry_name(e), color, 1)
+			draw_text(118, y, ll.entry_name(e), color, 1)
 			score := fmt.tprintf("%d", e.score)
 			draw_text(290 - text_w(score, 1), y, score, color, 1)
 		}
@@ -788,8 +742,8 @@ draw_name :: proc() {
 	draw_centered(200, 38, note, DIM, 1)
 	fill_rect(98, 56, 204, 28, INK, 1)
 	fill_rect(99, 57, 202, 26, BACK, 1)
-	draw_text(104, 62, game.name_text(&name_edit), INK, 2)
-	if name_edit.len < game.NAME_LEN {
+	draw_text(104, 62, ll.name_text(&name_edit), INK, 2)
+	if name_edit.len < ll.NAME_LEN {
 		fill_rect(f32(104 + name_edit.len * 12), 77, 10, 2, ACCENT, 1)
 	}
 	for i in 0 ..= len(name_keys) {
@@ -1005,7 +959,7 @@ draw_play :: proc() {
 		if new_best {
 			draw_centered(cx, 148, "NEW BEST!", GOOD, 1)
 		}
-		#partial switch board.submit {
+		#partial switch ll.board.submit {
 		case .Sending: draw_centered(cx, 160, "SENDING SCORE...", DIM, 1)
 		case .Sent:    draw_centered(cx, 160, "SCORE SENT ONLINE", GOOD, 1)
 		case .Failed:  draw_centered(cx, 160, "COULD NOT SEND SCORE", ACCENT, 1)
