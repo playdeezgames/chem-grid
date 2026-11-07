@@ -16,8 +16,8 @@
 <body>
 <canvas id="screen" width="400" height="300"></canvas>
 <footer>
-  Chem-Grid by TheGrumpyGameDev. Font DINOBYTE by mby (CC BY 4.0). Code, art and sound made by an AI agent (Claude Code) at the author's direction. Online scores by LootLocker.
-  <a href="https://thegrumpygamedev.itch.io/">itch.io</a> · <a href="https://playdeezgames.github.io/oeuvre-of-splorr/">more games</a>
+  Chem-Grid by TheGrumpyGameDev. Font DINOBYTE by mby (CC BY 4.0). Code, art and sound made by an AI agent (Claude Code) at the author's direction. Online scores and feedback by LootLocker.
+  <a href="#" id="feedback-link">Send feedback (F)</a> · <a href="https://thegrumpygamedev.itch.io/">itch.io</a> · <a href="https://playdeezgames.github.io/oeuvre-of-splorr/">more games</a>
 </footer>
 <script type="text/javascript" src="odin.js"></script>
 <script type="text/javascript" src="lootlocker.js"></script>
@@ -87,6 +87,9 @@
   });
   const testBoard = new URLSearchParams(location.search).get("board") === "test";
   const boardFor = (k) => (testBoard ? k + "_test" : k);
+  // Feedback (the shim's form): reports go to the console under Feedback, Game (categories Bug, Idea, Other).
+  const feedback = ll.feedbackDialog({ game: "Chem-Grid" });
+  document.getElementById("feedback-link").addEventListener("click", (e) => { e.preventDefault(); feedback.open(); });
 
   const memory = new odin.WasmMemoryInterface();
   odin.runWasm("game.wasm", null, {
@@ -126,6 +129,8 @@
       storage_set: (kp, kl, vp, vl) => {
         try { localStorage.setItem(memory.loadString(kp, kl), memory.loadString(vp, vl)); } catch (e) {}
       },
+      // F on any screen but name typing (the game decides).
+      open_feedback: () => { feedback.open(); },
       draw_text: (x, y, ptr, len, rgb, scale) => {
         drawText(x, y, memory.loadString(ptr, len), rgb, scale);
       },

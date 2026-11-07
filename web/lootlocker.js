@@ -1,9 +1,9 @@
-// SPLORR!! LootLocker shim, version 1 (November 7, 2026). Source of truth: the bok-of-splorr vault,
-// splorr/Tech/lootlocker/. Copy it into a game's web/ folder unchanged; per-game settings go in the page.
-// How to use it: splorr/Tech/LootLocker.md.
+// SPLORR!! LootLocker shim, version 2 (November 7, 2026; version 2 adds feedback). Source of truth: the
+// bok-of-splorr vault, splorr/Tech/lootlocker/. Copy it into a game's web/ folder unchanged; per-game
+// settings go in the page. How to use it: splorr/Tech/LootLocker.md.
 //
-// Talks to LootLocker's Game API from the browser: guest sign-in, player name, leaderboards, player storage
-// and server time. The key is a game's public client key, not a secret. Every host that serves the page must
+// Talks to LootLocker's Game API from the browser: guest sign-in, player name, leaderboards, player storage,
+// server time and feedback reports. The key is a game's public client key, not a secret. Every host that serves the page must
 // be on the LootLocker game's CORS Allowlist (GitHub Pages: https://playdeezgames.github.io; itch.io:
 // https://html-classic.itch.zone). Nothing here is cheat-proof: whatever the client sends is trusted.
 //
@@ -13,6 +13,7 @@
 //   await ll.submit("board_key", 1540, "optional metadata");
 //   await ll.storageSet("save", json); const v = await ll.storageGet("save"); // null when missing
 //   const when = await ll.serverTime();          // a Date, from LootLocker's clock
+//   const fb = ll.feedbackDialog({ game: "Chem-Grid" }); fb.open(); // a ready-made report form
 //
 // For an Odin game, ll.odinImports(memory) gives the "lootlocker" import namespace that the shared Odin
 // package (lootlocker.odin) expects; pass it to odin.runWasm next to the game's own namespace.
@@ -150,6 +151,96 @@ function LootLocker(cfg) {
     // LootLocker's clock, so a daily seed is the same for every player whatever their own clock says.
     async serverTime() {
       return withSession(async (s) => new Date((await call("GET", "/game/ping", s.token)).date));
+    },
+
+    // Feedback reports. Categories are made per entity type (game, player, ugc) in the console under
+    // Feedback, Settings; none exist on a new LootLocker game and a report needs one. Reports about the game
+    // need no entity_id (tested November 7, 2026) and show in the console under Feedback, Game.
+    // The list path is /game/feedback/category/entity/{entity}; the reference's /game/feedback/entity/{entity} is a 404.
+    async feedbackCategories(entity = "game") {
+      return withSession(async (s) => {
+        const r = await call("GET", "/game/feedback/category/entity/" + enc(entity), s.token);
+        return ((r && r.categories) || []).map((c) => ({ id: c.id, name: c.name, description: c.description || "" }));
+      });
+    },
+    async feedback(categoryId, description, entity = "game", entityId) {
+      return withSession((s) => {
+        const body = { entity, category_id: categoryId, description: String(description) };
+        if (entityId) body.entity_id = entityId;
+        return call("POST", "/game/feedback", s.token, body);
+      });
+    },
+
+    // A ready-made feedback form in a <dialog>: category, text, Send. Keys typed in it do not reach the
+    // game (keydown stops at the dialog). opts: game (name, for the context line), maxLength (default
+    // 1000), context() (extra text appended to the report, e.g. the screen or level), onClose().
+    // Style it from the page with the .ll-feedback class; the defaults follow the page's font and colours.
+    feedbackDialog(opts = {}) {
+      const maxLength = opts.maxLength || 1000;
+      if (!document.getElementById("ll-feedback-style")) {
+        const st = document.createElement("style");
+        st.id = "ll-feedback-style";
+        st.textContent = ".ll-feedback{font:inherit;color:inherit;background:inherit;border:2px solid currentColor;max-width:min(420px,92vw);width:100%;box-sizing:border-box;padding:12px}" +
+          ".ll-feedback::backdrop{background:rgba(0,0,0,.4)}.ll-feedback h2{margin:0 0 6px;font-size:1.3em}.ll-feedback p{margin:0 0 8px}" +
+          ".ll-feedback select,.ll-feedback textarea,.ll-feedback button{font:inherit;color:inherit;background:transparent;border:1px solid currentColor;padding:4px;box-sizing:border-box}" +
+          ".ll-feedback textarea{width:100%;height:8em;resize:vertical;display:block;margin:6px 0}.ll-feedback .row{display:flex;gap:8px;justify-content:flex-end;align-items:center}" +
+          ".ll-feedback .status{flex:1;min-height:1.4em}";
+        document.head.appendChild(st);
+      }
+      const d = document.createElement("dialog");
+      d.className = "ll-feedback";
+      d.innerHTML = '<form method="dialog"><h2>Send feedback</h2>' +
+        "<p>Goes to the developer through LootLocker. Please leave out personal details.</p>" +
+        '<label>Kind: <select name="cat" required><option value="">Loading...</option></select></label>' +
+        '<textarea name="text" required placeholder="What happened, or what would you like?"></textarea>' +
+        '<div class="row"><span class="status" role="status"></span>' +
+        '<button type="button" value="cancel">Cancel</button><button type="submit" value="send">Send</button></div></form>';
+      document.body.appendChild(d);
+      const form = d.querySelector("form"), sel = form.cat, text = form.text, status = d.querySelector(".status");
+      const send = form.querySelector('[value="send"]');
+      text.maxLength = maxLength;
+      d.addEventListener("keydown", (e) => e.stopPropagation());
+      d.addEventListener("keyup", (e) => e.stopPropagation());
+      d.addEventListener("close", () => { if (opts.onClose) opts.onClose(); });
+      form.querySelector('[value="cancel"]').addEventListener("click", () => d.close());
+      let loaded = false;
+      const load = async () => {
+        try {
+          const cats = await api.feedbackCategories("game");
+          if (!cats.length) throw new Error("no categories");
+          sel.innerHTML = '<option value="">Choose...</option>' + cats.map((c) =>
+            '<option value="' + c.id + '" title="' + c.description.replace(/"/g, "&quot;") + '">' + c.name.replace(/</g, "&lt;") + "</option>").join("");
+          loaded = true; send.disabled = false; status.textContent = "";
+        } catch (e) {
+          sel.innerHTML = '<option value="">Unavailable</option>';
+          send.disabled = true; status.textContent = "Could not reach the feedback service. Offline?";
+        }
+      };
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        if (!sel.value || !text.value.trim()) { status.textContent = "Pick a kind and write something."; return; }
+        send.disabled = true; status.textContent = "Sending...";
+        const extra = opts.context ? String(opts.context() || "") : "";
+        const line = [opts.game || document.title, version, location.hostname, innerWidth + "x" + innerHeight, extra].filter(Boolean).join(" · ");
+        try {
+          await api.feedback(sel.value, text.value.trim() + "\n\n-- " + line);
+          text.value = ""; status.textContent = "Sent. Thank you!";
+          setTimeout(() => { if (d.open) d.close(); status.textContent = ""; send.disabled = false; }, 1500);
+        } catch (err) {
+          status.textContent = "Could not send. Try again later."; send.disabled = false;
+        }
+      });
+      return {
+        open() {
+          if (d.open) return;
+          status.textContent = ""; send.disabled = !loaded;
+          d.showModal();
+          if (!loaded) load();
+          text.focus();
+        },
+        close() { if (d.open) d.close(); },
+        get isOpen() { return d.open; },
+      };
     },
 
     // The "lootlocker" import namespace for the shared Odin package. Results come back through its exports.

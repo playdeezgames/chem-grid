@@ -20,6 +20,8 @@ foreign canvas {
 	draw_text :: proc(x, y: f32, text: string, rgb: u32, scale: i32) ---
 	// Play sound number `sound` (game.Sound). The page unlocks audio on the first key or pointer press.
 	play_sound :: proc(sound: i32) ---
+	// The page's feedback form (LootLocker). Keys typed in it do not reach the game.
+	open_feedback :: proc() ---
 	// localStorage. storage_get copies the value into buf and returns its byte length, or -1 when
 	// there is none (or storage is unavailable) and -2 when it does not fit.
 	storage_get :: proc(key: string, buf: [^]u8, cap: i32) -> i32 ---
@@ -480,6 +482,7 @@ on_key :: proc(e: js.Event) {
 		case "Escape": screen = scores_back
 		case "KeyN": open_name(.Scores)
 		case "KeyM": toggle_mute()
+		case "KeyF": open_feedback()
 		case: handled = false
 		}
 	case .Title:
@@ -488,12 +491,14 @@ on_key :: proc(e: js.Event) {
 		case "KeyT": open_scores(.Title)
 		case "KeyL": screen = .Select
 		case "KeyM": toggle_mute()
+		case "KeyF": open_feedback()
 		case: handled = false
 		}
 	case .Select:
 		switch code {
 		case "Escape": screen = .Title
 		case "KeyM": toggle_mute()
+		case "KeyF": open_feedback()
 		case:
 			if len(code) == 6 && code[:5] == "Digit" && code[5] >= '1' && code[5] <= '9' {
 				start_level(int(code[5] - '1'))
@@ -507,6 +512,7 @@ on_key :: proc(e: js.Event) {
 			case "Enter", "Space": overlay_primary()
 			case "Escape": leave()
 			case "KeyM": toggle_mute()
+			case "KeyF": open_feedback()
 			case "KeyT":
 				if !play.has_goals {
 					open_scores(.Play)
@@ -522,6 +528,7 @@ on_key :: proc(e: js.Event) {
 		case "KeyQ", "ArrowLeft", "ArrowDown": do_rotate(-1)
 		case "Escape": leave()
 		case "KeyM": toggle_mute()
+		case "KeyF": open_feedback()
 		case:
 			if len(code) == 6 && code[:5] == "Digit" && code[5] >= '1' && code[5] <= '8' {
 				do_select(int(code[5] - '1'))
